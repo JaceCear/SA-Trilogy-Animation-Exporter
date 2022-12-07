@@ -3,3 +3,5 @@
 *.ilk
 *.obj
 *.pdb
+*.exe
+animExporter_gcc
