@@ -16,6 +16,9 @@ typedef unsigned short     u16;
 typedef unsigned int       u32;
 typedef unsigned long long u64;
 
+#define Min(a,b) (((a) < (b)) ? (a) : (b))
+#define Max(a,b) (((a) > (b)) ? (a) : (b))
+
 #define ALIGN(num, align) (num = ((num + (align - 1)) & -align))
 
 #define DEBUG 1

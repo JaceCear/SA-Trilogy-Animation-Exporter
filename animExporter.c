@@ -34,7 +34,7 @@ typedef struct {
 
 static void printAnimationTable(u8 *rom, AnimationTable *table, FILE *fileStream);
 
-char* animCommands[] = {
+const char* animCommands[] = {
     "AnimCmd_GetTileIndex",
     "AnimCmd_GetPalette",
     "AnimCmd_JumpBack",
@@ -93,21 +93,46 @@ romToVirtual(u8 *rom, u32 gbaPointer) {
         return NULL;
 }
 
+// TODO: Can indenting be done with character codes?
 static void
-printFileHeader(FILE *fileStream, AnimationTable* table) {
+printHeaderLine(FILE* fileStream, const char* name, int value, int rightAlign) {
+    // Print the amount of table entries
+    fprintf(fileStream, ".equ %s,", name);
+
+    // Print the indent
+    s16 indentSpaces = rightAlign - strlen(name);
+    for (; indentSpaces > 0; indentSpaces--)
+        fprintf(fileStream, " ");
+
+    // Print the value
+    fprintf(fileStream, "%d\n", value);
+}
+
+static void
+printFileHeader(FILE* fileStream, AnimationTable* table) {
+    // Set the section
     fprintf(fileStream, "\t.section .rodata\n");
-    
     fprintf(fileStream, "\n");
-    
-    // Print referencese to each table entry
+
+    const char* entryCountName = "NUM_ANIMATION_TABLE_ENTRIES";
+
+    // Find the biggest string out of the 'animCommands' array
+    s16 rightAlign = strlen(entryCountName);
+    for (int i = 0; i < SizeofArray(animCommands); i++)
+        rightAlign = Max(rightAlign, strlen(animCommands[i]));
+
+    // Space behind the comma
+    rightAlign += 1;
+
+    // Print definition of each Cmd's constant
     for(int i = 0; i < SizeofArray(animCommands); i++) {
-        fprintf(fileStream, ".equ %s,\t\t\t%d\n", animCommands[i], (-1) - i);
+        printHeaderLine(fileStream, animCommands[i], ((-1) - i), rightAlign);
     }
     fprintf(fileStream, "\n");
 
-    // Print the amount of table entries
-    fprintf(fileStream, ".equ %s,\t\t\t%d\n", "NUM_ANIMATION_TABLE_ENTRIES", table->entryCount);
-
+    // Print the number of entries in the table
+    printHeaderLine(fileStream, entryCountName, table->entryCount, rightAlign);
+    fprintf(fileStream, "\n");
 }
 
 bool
