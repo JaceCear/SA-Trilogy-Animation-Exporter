@@ -211,7 +211,7 @@ printAnimationDataFile(u8* rom, AnimationTable *animTable, FILE* fileStream) {
                             "\t\t.4byte\t%s", animCommands[~(*anim.cursor)]);
                 } else {
                     // NOTE(Jace): There's a corner-case in SA1, where
-                    //             anim_777 starts with 0xC, not a command.
+                    //             anim_0777 starts with 0xC, not a command.
                     //             This gets around that.
                     if (cursorIsAtStartOfSubAnim) {
                         // Print said corner-case value
