@@ -1,7 +1,15 @@
 .git
 .vs
+
+*.s
+
 *.ilk
 *.obj
 *.pdb
+
+*.gba
+*.bin
+*.raw
+
+animExporter
 *.exe
-animExporter_gcc
