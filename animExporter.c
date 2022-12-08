@@ -138,8 +138,6 @@ printAnimationDataFile(u8* rom, AnimationTable *animTable, FILE* fileStream) {
     
     printFileHeader(fileStream, animTable);
     
-    // TODO: Find multiple occurences of identical animations and sort accordingly
-    
     for(int i = 0; i < animTable->entryCount; i++) {
         if(cursor[i]) {
             
