@@ -22,6 +22,9 @@ const u32 g_TotalSpriteStateCount[3] = {
     SA3_ANIMATION_COUNT,
 };
 
+// Creating separate files for each animation takes a lot of time (4 seconds for me),
+// so print to stdout per default, which is instant if it's directed to a file with ' > file.out'
+#define PRINT_TO_STDOUT TRUE
 
 typedef struct {
     u32 *data;
@@ -33,6 +36,11 @@ typedef struct {
     s32 *cursor;
     s32 subCount; // There can be multiple "sub animations" in one entry.
 } AnimationData;
+
+typedef struct {
+    FILE* header;
+    FILE* animTable;
+} OutFiles;
 
 // Identifiers
 #define AnimCmd_GetTiles        -1
@@ -220,7 +228,7 @@ printMacros(FILE* fileStream) {
 }
 
 static void
-printFileHeader(FILE* fileStream, AnimationTable* table) {
+printFileHeader(FILE* fileStream, s32 entryCount) {
     // Set the section
     fprintf(fileStream, "\t.section .rodata\n");
     fprintf(fileStream, "\n");
@@ -242,7 +250,7 @@ printFileHeader(FILE* fileStream, AnimationTable* table) {
     fprintf(fileStream, "\n");
 
     // Print the number of entries in the table
-    printHeaderLine(fileStream, entryCountName, table->entryCount, rightAlign);
+    printHeaderLine(fileStream, entryCountName, entryCount, rightAlign);
     fprintf(fileStream, "\n\n");
 }
 
@@ -274,7 +282,7 @@ static void* printCommand(FILE* fileStream, void* inCursor) {
 
     // Print macro name
     s32 cmdId = ~(*cursor);
-    fprintf(fileStream, "\t\t%s ", macroNames[cmdId]);
+    fprintf(fileStream, "\t%s ", macroNames[cmdId]);
 
 
     // Print the commands
@@ -386,13 +394,15 @@ static void* printCommand(FILE* fileStream, void* inCursor) {
 
 
 static void
-printAnimationDataFile(u8* rom, AnimationTable *animTable, FILE* fileStream) {
+printAnimationDataFile(u8* rom, AnimationTable *animTable, OutFiles* outFiles) {
     AnimationData anim;
     
     s32 *cursor = animTable->data;
     
-    printFileHeader(fileStream, animTable);
-    printMacros(fileStream);
+    printFileHeader(outFiles->header, animTable->entryCount);
+    printMacros(outFiles->header);
+
+    char filename[256];
 
     for(int i = 0; i < animTable->entryCount; i++) {
         if(cursor[i]) {
@@ -400,6 +410,15 @@ printAnimationDataFile(u8* rom, AnimationTable *animTable, FILE* fileStream) {
             if(wasReferencedBefore(animTable, i, 0))
                 continue;
             
+#if !PRINT_TO_STDOUT
+            sprintf(filename, "out/anim_%04d.inc", i);
+            FILE* animFile = fopen(filename, "w");
+#else
+            FILE* animFile = NULL;
+#endif
+            if (animFile == NULL)
+                animFile = stdout;
+
             anim.base   = romToVirtual(rom, cursor[i]);
             anim.cursor = romToVirtual(rom, *anim.base);
             
@@ -419,8 +438,8 @@ printAnimationDataFile(u8* rom, AnimationTable *animTable, FILE* fileStream) {
                 
                 anim.subCount = subAnimCount;
             }
-            
-            fprintf(fileStream, "\n.align 2, 0");
+
+            fprintf(animFile, "\n");
             int nextSubIndex = 0;
             while((void*)anim.cursor < (void*)anim.base) {
                 bool cursorIsAtStartOfVariant = (anim.cursor == romToVirtual(rom, anim.base[nextSubIndex]));
@@ -428,46 +447,47 @@ printAnimationDataFile(u8* rom, AnimationTable *animTable, FILE* fileStream) {
                 if((nextSubIndex < anim.subCount) && cursorIsAtStartOfVariant) {
                     
                     // Label for sub animation
-                    fprintf(fileStream,
+                    fprintf(animFile,
                             /*"\n.global anim_data__%04d_%d" // No need to make them global, right? */
-                            "\n\tanim_data__%04d_%d:\n", i, nextSubIndex);
+                            "\n"
+                            "anim_data__%04d_%d:\n", i, nextSubIndex);
                     
                     nextSubIndex++;
                 }
                 
                 bool isCursorAtCmd = (*anim.cursor < 0 && *anim.cursor >= -12);
                 if (isCursorAtCmd) {
-                    anim.cursor = printCommand(fileStream, anim.cursor);
+                    anim.cursor = printCommand(animFile, anim.cursor);
                 } else {
                     // NOTE(Jace): If instead of a command, the cursor finds a positive number
                     //             it is some yet not documented pair of numbers, which get printed together.
                     //             It does not matter, whether the 2nd number is positive or negative.
 
-                    fprintf(fileStream, "\t\t.4byte\t%d, %d", anim.cursor[0], anim.cursor[1]);
+                    fprintf(animFile, "\t.4byte\t%d, %d", anim.cursor[0], anim.cursor[1]);
                     anim.cursor += 2;
 
-                    fprintf(fileStream, "\n\n");
+                    fprintf(animFile, "\n\n");
                 }
                 
             }
             
-            fprintf(fileStream,
+            fprintf(animFile,
                     "\n"
                     "\n"
-                    ".align 2, 0\n"
-                    "\tanim_%04d:\n", i);
+                    "anim_%04d:\n", i);
             
             // Print (sub) animation pointer(s)
             for(int subIndex = 0; subIndex < anim.subCount; subIndex++) {
-                fprintf(fileStream, "\t\t.4byte anim_data__%04d_%d\n", i, subIndex);
+                fprintf(animFile, "\t.4byte anim_data__%04d_%d\n", i, subIndex);
             }
             
-            fprintf(fileStream, "\n\n\n");
-            
+            //fprintf(animFile, "\n\n\n");
+            if (animFile != NULL && animFile != stdout)
+                fclose(animFile);
         }
     }
     
-    printAnimationTable(rom, animTable, fileStream);
+    printAnimationTable(rom, animTable, outFiles->animTable);
 }
 
 static void
@@ -475,6 +495,7 @@ printAnimationTable(u8 *rom, AnimationTable *table, FILE *fileStream) {
     const char* animTableVarName = "gSpriteAnimations";
 
     fprintf(fileStream,
+            "\n"
             ".align 2, 0\n"
             ".global %s\n"
             "%s:\n", animTableVarName, animTableVarName);
@@ -594,7 +615,23 @@ int main(int argCount, char** args) {
                     animTable.data = address;
                     animTable.entryCount = g_TotalSpriteStateCount[romIndex - 1];
 
-                    printAnimationDataFile(rom, &animTable, stdout);
+                    OutFiles files = { 0 };
+#if !PRINT_TO_STDOUT
+                    files.header      = fopen("out/macros.inc", "w");
+                    files.animTable = fopen("out/animation_table.inc", "w");
+#endif
+                    if (!files.header)
+                        files.header = stdout;
+
+                    if (!files.animTable)
+                        files.animTable = stdout;
+                    printAnimationDataFile(rom, &animTable, &files);
+
+                    if(files.animTable != NULL && files.animTable != stdout)
+                        fclose(files.animTable);
+
+                    if (files.header != NULL && files.header != stdout)
+                        fclose(files.header);
                 }
             }
             else {
