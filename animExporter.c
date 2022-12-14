@@ -62,8 +62,8 @@ const char* animCommands[] = {
     "AnimCmd_12",
 
     // This is NOT a "real" command, but a
-    // notification for the game than it should
-    // display the frame, and for how long.
+    // notification for the game that it should
+    // display a specfic frame, and for how long.
     "AnimCmd_Display",
 };
 
