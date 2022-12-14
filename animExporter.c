@@ -372,7 +372,7 @@ printCommand(FILE* fileStream, DynTableAnimCmd* inAnimCmd, LabelStrings* labels)
 static void
 printAnimationDataFile(FILE* fileStream, DynTable* dynTable,
     LabelStrings* labels, MemArena *stringArena, MemArena* stringOffsetArena,
-    u32 numAnims, OutFiles* outFiles, int gameIndex) {
+    u32 numAnims, OutFiles* outFiles) {
     AnimationData anim;
     
     printFileHeader(outFiles->header, numAnims);
@@ -383,7 +383,7 @@ printAnimationDataFile(FILE* fileStream, DynTable* dynTable,
     u16* variantCounts = dynTable->variantCounts;
 
     for (int i = 0; i < numAnims; i++) {
-        if (table[i].offsetVariants) {
+        if (table[i].offsetVariants >= 0) {
             s32* variantOffsets = (s32*)PointerFromOffset(&table[i], table[i].offsetVariants);
             u16 numVariants = variantCounts[i];
 
@@ -417,17 +417,18 @@ printAnimationDataFile(FILE* fileStream, DynTable* dynTable,
                     // Break loop after printing jump/end command
                     if((currCmd->cmd.cmdId == AnimCmd_4)
                     || (currCmd->cmd.cmdId == AnimCmd_JumpBack)
-                    || ((gameIndex == 1) && (currCmd->cmd.cmdId == AnimCmd_SetIdAndVariant)))
+                    || (currCmd->cmd.cmdId == AnimCmd_SetIdAndVariant))
                         break;
 
                     currCmd++;
                 }
             }
 
-            { // Print variant pointers
+            if (table[i].name) { // Print variant pointers
                 char* entryName = getStringFromId(labels, table[i].name);
-                if(entryName)
+                if (entryName)
                     fprintf(fileStream, "%s:\n", entryName);
+
                 for (int variantId = 0; variantId < numVariants; variantId++) {
                     fprintf(fileStream, "\t.4byte %s__variant_%d_l%d\n", animName, variantId, 0);
                 }
@@ -459,7 +460,7 @@ wasReferencedBefore(AnimationTable* animTable, int entryIndex, int* prevIndex) {
 
 static void
 printAnimationTable(FILE* fileStream, DynTable* dynTable, AnimationTable* table, LabelStrings* labels) {
-    const char* animTableVarName = "gSpriteAnimations";
+    const char* animTableVarName = "gAnimations";
 
     fprintf(fileStream,
             "\n"
@@ -670,8 +671,7 @@ fillVariantFromRom(MemArena* arena, u8* rom, const RomPointer* variantInRom) {
                 currCmd->cmd._animId.variant = cmdInRom->_animId.variant;
                 structSize = sizeof(ACmd_SetIdAndVariant);
 
-                if (romIndex == 1)
-                    breakLoop = TRUE;
+                breakLoop = TRUE;
                 break;
 
             case AnimCmd_10:
@@ -760,6 +760,17 @@ createDynamicAnimTable(MemArena* arena, u8* rom, AnimationTable *animTable, DynT
         if (animPointer == 0)
             continue;
 
+        // Don't print an animation that we already printed.
+        int prevIndex = -1;
+        if (wasReferencedBefore(animTable, animationId, &prevIndex)) {
+            s32 offsetCurrPrev = (&table[prevIndex] - &table[animationId]);
+
+            table[animationId].offsetVariants = offsetCurrPrev;
+            variantsPerAnim[animationId] = variantsPerAnim[prevIndex];
+
+            continue;
+        }
+
         RomPointer *variantsInRom = romToVirtual(rom, animPointer);
 
         // allocate offsets of each variant
@@ -813,10 +824,24 @@ createAnimLabels(DynTable* table, u32 numAnimations, LabelStrings* labels, MemAr
     // TODO: Implement loading main animation-labels from file.
     char buffer[256];
     for (u32 animId = 0; animId < numAnimations; animId++) {
-        if (table->animations[animId].offsetVariants != 0) {
-            sprintf(buffer, "anim_%04d", animId);
-            StringId stringId = pushLabel(labels, stringArena, stringOffsetArena, buffer);
-            table->animations[animId].name = stringId;
+        // We need to check 'name' as well, since we assigned
+        // the offsets for already-referenced anims in 'createDynamicAnimTable'
+        DynTableAnim* current = &table->animations[animId];
+
+        if(current->offsetVariants != 0) {
+            StringId stringId = 0;
+
+            // (offset < 0) -> references previous entry, 
+            if (current->offsetVariants < 0) {
+                DynTableAnim* previous = (DynTableAnim*)PointerFromOffset(current, current->offsetVariants);
+
+                stringId = previous->name;
+            }
+            else {
+                sprintf(buffer, "anim_%04d", animId);
+                stringId = pushLabel(labels, stringArena, stringOffsetArena, buffer);
+            }
+            current->name = stringId;
         }
     }
 
@@ -886,10 +911,7 @@ int main(int argCount, char** args) {
                     LabelStrings labels = { 0 };
                     createAnimLabels(&dynTable, animTable.entryCount, &labels, &stringArena, &stringOffsetArena);
 
-                    int k = 123;
-
-                    int gameIndex = getRomIndex(rom);
-                    printAnimationDataFile(stdout, &dynTable, &labels, &stringArena, &stringOffsetArena, animTable.entryCount, &files, gameIndex);
+                    printAnimationDataFile(stdout, &dynTable, &labels, &stringArena, &stringOffsetArena, animTable.entryCount, &files);
 
 
                     printAnimationTable(files.animTable, &dynTable, &animTable, &labels);
