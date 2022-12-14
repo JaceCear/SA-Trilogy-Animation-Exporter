@@ -9,6 +9,7 @@ typedef struct {
 
 void memArenaInit(MemArena*);
 void memArenaFree(MemArena *arena);
+void* memArenaReserve(MemArena* arena, u64 srcLength);
 void *memArenaAddMemory(MemArena *arena, void *source, u64 srcLength);
 char *memArenaAddString(MemArena *arena, char *source);
 u64 *memArenaAddU64(MemArena *arena, u64 number);

@@ -6,7 +6,7 @@
 #include "types.h"
 #include "ArenaAlloc.h"
 
-#define ARENA_SIZE (512*1024)
+#define ARENA_SIZE (2*1024*1024)
 
 static void memArenaExpand(MemArena *arena, s32 numNewArenas);
 
@@ -31,21 +31,41 @@ memArenaFree(MemArena *arena) {
     memset(arena, 0, sizeof(MemArena));
 }
 
+// Reserve 'byteCount' amount of memory and set it to zero.
 void*
-memArenaAddMemory(MemArena *arena, void *source, u64 srcLength) {
+memArenaReserve(MemArena *arena, u64 byteCount) {
+    if (byteCount == 0)
+        return NULL;
+
     ALIGN(arena->offset, 4);
     
-    if(arena->size < (arena->offset + srcLength)) {
-        int newArenaCount = ((arena->offset + srcLength) - arena->size);
+    if(arena->size < (arena->offset + byteCount)) {
+        // TODO: There's a bug that stems from realloc returning a different address after calling it.
+        //       Use VirtualAlloc and the Unix-equivalent to fix that.
+        //       That's why we're asserting here.
+        // Allocate more memory upfront for now, if you reach this assert!
+        assert(FALSE);
+
+        int newArenaCount = ((arena->offset + byteCount) - arena->size);
         newArenaCount /= ARENA_SIZE;
         newArenaCount += 1;
         
         memArenaExpand(arena, newArenaCount);
     }
-    
-    u8 *dest = ((u8*)arena->memory + arena->offset);
+
+    u8* memory = ((u8*)arena->memory + arena->offset);
+    memset(memory, 0, byteCount);
+
+    arena->offset += byteCount;
+
+    return memory;
+}
+
+void*
+memArenaAddMemory(MemArena *arena, void *source, u64 srcLength) {
+    u8* dest = memArenaReserve(arena, srcLength);
+
     memcpy(dest, source, srcLength);
-    arena->offset += srcLength;
     
     return dest;
 }
