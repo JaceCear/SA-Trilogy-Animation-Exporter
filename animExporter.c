@@ -524,7 +524,7 @@ getRomIndex(u8* rom) {
         result = GAME_SA3;
     }
     
-    if (!strncmp((rom + 0xA0), "AGB KIRBY AMB8KP", 16ul)) {
+    if (!strncmp((rom + 0xA0), "AGB KIRBY AMB8K", 15ul)) {
         result = GAME_KATAM;
     }
 
