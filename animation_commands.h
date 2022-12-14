@@ -99,19 +99,20 @@ typedef struct {
 } ACmd_12;
 
 
-// SA1 has some weird pointer that's behind AnimCmd_0033
-typedef struct {
-    /* 0x00 */ s32 cmdId; // -13
-
-    /* 0x04 */ RomPointer ptr;
-} ExCmd_UnusedPointer;
-
-
 // Only for use with exporter, not in-game!
 typedef struct {
-    s32 cmdId; // this will be a positive value (or zero?)
-    s32 wordOrCmd;  // is command if negative
-} ACmd_UnkData;
+    union {
+        // "cmdId" has to be greater than 0 for this command,
+        // since it's actually not a command.
+        s32 cmdId;
+
+        // number of frames this will be displayed
+        s32 displayForNFrames;
+    };
+
+    // frameId of this animation that should be displayed
+    s32 frameIndex;     
+} ACmd_Display;
 
 // Only for use with exporter, not in-game!
 typedef union {
@@ -130,8 +131,10 @@ typedef union {
     ACmd_11 _11;
     ACmd_12 _12;
 
+    // Not a regular "AnimCmd"
+    ACmd_Display _display;
+
     // Editor-only!
-    ACmd_UnkData _unkData;
     ExCmd_JumpBack _exJump;
 } ACmd;
 

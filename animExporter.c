@@ -22,7 +22,7 @@
 #define SA2_ANIMATION_COUNT    1133
 #define SA3_ANIMATION_COUNT    1524
 
-const u32 g_TotalSpriteStateCount[3] = {
+const u32 g_TotalAnimationCount[3] = {
     SA1_ANIMATION_COUNT,
     SA2_ANIMATION_COUNT,
     SA3_ANIMATION_COUNT,
@@ -45,7 +45,7 @@ const u32 g_TotalSpriteStateCount[3] = {
 #define AnimCmd_10              -10
 #define AnimCmd_11              -11
 #define AnimCmd_12              -12
-#define ExCmd_UnusedPtr         (AnimCmd_12-1)
+#define AnimCmd_DisplayFrame    (AnimCmd_12-1)
 
 const char* animCommands[] = {
     "AnimCmd_GetTiles",
@@ -60,7 +60,11 @@ const char* animCommands[] = {
     "AnimCmd_10",
     "AnimCmd_11",
     "AnimCmd_12",
-    "ExCmd_UnusedPtr",
+
+    // This is NOT a "real" command, but a
+    // notification for the game that it should
+    // display a specfic frame, and for how long.
+    "AnimCmd_Display",
 };
 
 const char* macroNames[SizeofArray(animCommands)] = {
@@ -76,7 +80,8 @@ const char* macroNames[SizeofArray(animCommands)] = {
     "mAnimCmd10",
     "mAnimCmd11",
     "mAnimCmd12",
-    "mLonePointer",
+
+    "mDisplayFrame"
 };
 
 // %s placeholders:
@@ -165,12 +170,12 @@ const char* macros[SizeofArray(animCommands)] = {
         ".4byte %s\n"
         "  .4byte \\unk4\n"
         ".endm\n",
-    
-    [~(ExCmd_UnusedPtr)] =
-        ".macro %s romPtr:req\n"
-        "  .4byte \\romPtr\n"
-        ".endm\n",
 
+
+    [~(AnimCmd_DisplayFrame)] =
+        ".macro %s displayFor:req frameIndex:req\n"
+        "  .4byte \\displayFor, \\frameIndex\n"
+        ".endm\n",
 };
 
 static void printAnimationTable(FILE* fileStream, DynTable* dynTable, AnimationTable* animTable, LabelStrings* labels);
@@ -276,8 +281,10 @@ printCommand(FILE* fileStream, DynTableAnimCmd* inAnimCmd, LabelStrings* labels)
 
     // Print macro name
     s32 nottedCmdId = ~(inCmd->cmdId);
-    if(nottedCmdId >= 0)
+    if (nottedCmdId >= 0)
         fprintf(fileStream, "\t%s ", macroNames[nottedCmdId]);
+    else
+        fprintf(fileStream, "\t%s ", macroNames[~(AnimCmd_DisplayFrame)]);
 
 
     // Print the command paramters
@@ -350,20 +357,21 @@ printCommand(FILE* fileStream, DynTableAnimCmd* inAnimCmd, LabelStrings* labels)
     } break;
 
     default: {
-        ACmd_UnkData* cmd = &inCmd->_unkData;
+        ACmd_Display* cmd = &inCmd->_display;
         if (cmd->cmdId < 0) {
             // This shouldn't be reached.
             fprintf(stderr,
                 "Exporting failed, impossible state reached.\n"
-                "Animation Commands was invalid: %d", cmd->cmdId);
+                "Animation Command was invalid: %d", cmd->cmdId);
             exit(-1);
         }
         else {
-            if (cmd->cmdId >= ROM_BASE || cmd->wordOrCmd >= ROM_BASE) {
-                // @TODO / @BUG! If we land here, that means a pointer was mistaken as an "unknown command"
-                fprintf(fileStream, "\t.4byte 0x%07X, 0x%07X\n\n", cmd->cmdId, cmd->wordOrCmd);
+            if (cmd->cmdId >= ROM_BASE || cmd->frameIndex >= ROM_BASE) {
+                // @BUG! If we land here, that means a pointer was mistaken as an "unknown command"
+                fprintf(fileStream, "\t.4byte 0x%07X, 0x%07X\n\n", cmd->displayForNFrames, cmd->frameIndex);
+                assert(FALSE);
             } else
-                fprintf(fileStream, "\t.4byte %d, %d\n\n", cmd->cmdId, cmd->wordOrCmd);
+                fprintf(fileStream, "0x%X 0x%X\n\n", cmd->displayForNFrames, cmd->frameIndex);
         }
     }
     }
@@ -690,13 +698,6 @@ fillVariantFromRom(MemArena* arena, u8* rom, const RomPointer* variantInRom) {
                 currCmd->cmd._12.unk4 = cmdInRom->_12.unk4;
                 structSize = sizeof(ACmd_12);
                 break;
-
-            case ExCmd_UnusedPtr:
-                currCmd->cmd.cmdId = cmdInRom->cmdId;
-                // Setting a negative value should make it be ignored.
-                currCmd->cmd._unkData.wordOrCmd = -1;
-                structSize = sizeof(RomPointer);
-                break;
             }
         }
         else {
@@ -706,10 +707,10 @@ fillVariantFromRom(MemArena* arena, u8* rom, const RomPointer* variantInRom) {
                 ;
             }
             else {
-                currCmd->cmd.cmdId = cmdInRom->cmdId;
-                currCmd->cmd._unkData.wordOrCmd = cmdInRom->_unkData.wordOrCmd;
+                currCmd->cmd._display.displayForNFrames = cmdInRom->_display.displayForNFrames;
+                currCmd->cmd._display.frameIndex = cmdInRom->_display.frameIndex;
 
-                structSize = sizeof(ACmd_UnkData);
+                structSize = sizeof(ACmd_Display);
             }
         }
 
@@ -882,7 +883,7 @@ int main(int argCount, char** args) {
                     // SA2 anim table should be: 0x08135EC4
 
                     animTable.data = address;
-                    animTable.entryCount = g_TotalSpriteStateCount[romIndex - 1];
+                    animTable.entryCount = g_TotalAnimationCount[romIndex - 1];
 
                     OutFiles files = { 0 };
 #if !PRINT_TO_STDOUT
