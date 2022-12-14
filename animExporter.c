@@ -30,7 +30,7 @@ const u32 g_TotalSpriteStateCount[3] = {
 
 // Creating separate files for each animation takes a lot of time (4 seconds for me),
 // so print to stdout per default, which is instant if it's directed to a file with ' > file.out'
-#define PRINT_TO_STDOUT TRUE
+#define PRINT_TO_STDOUT !TRUE
 
 // Identifiers
 #define AnimCmd_GetTiles        -1
@@ -426,10 +426,7 @@ printAnimationDataFile(FILE* fileStream, DynTable* dynTable,
                 if(entryName)
                     fprintf(fileStream, "%s:\n", entryName);
                 for (int variantId = 0; variantId < numVariants; variantId++) {
-
-                    sprintf(labelBuffer, "\t%s__variant_%d_l%d\n", animName, variantId, 0);
-                    char* labelAsString = labelBuffer;
-                    fprintf(fileStream, labelAsString, "");
+                    fprintf(fileStream, "\t%s__variant_%d_l%d\n", animName, variantId, 0);
                 }
                 fprintf(fileStream, "\n\n");
             }
@@ -889,7 +886,7 @@ int main(int argCount, char** args) {
                     printAnimationDataFile(stdout, &dynTable, &labels, &stringArena, &stringOffsetArena, animTable.entryCount, &files, gameIndex);
 
 
-                    printAnimationTable(stdout, &dynTable, &animTable, &labels);
+                    printAnimationTable(files.animTable, &dynTable, &animTable, &labels);
 
                     if(files.animTable != NULL && files.animTable != stdout)
                         fclose(files.animTable);
