@@ -16,6 +16,13 @@ typedef unsigned short     u16;
 typedef unsigned int       u32;
 typedef unsigned long long u64;
 
+typedef u32 RomPointer;
+typedef u32 StringId;
+
+#ifndef ROM_BASE
+#define ROM_BASE 0x08000000
+#endif
+
 #define Min(a,b) (((a) < (b)) ? (a) : (b))
 #define Max(a,b) (((a) > (b)) ? (a) : (b))
 

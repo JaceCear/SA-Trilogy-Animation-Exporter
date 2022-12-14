@@ -3,12 +3,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+
 #include "types.h"
 #include "arenaAlloc.h"
 
+// Needs to be included before animExporter.h
 #include "animation_commands.h"
 
+#include "animExporter.h"
+
 #define SizeofArray(array) ((sizeof(array)) / (sizeof(array[0])))
+
+#define PointerFromOffset(base, offset) (((u8*)(base)) + (offset))
 
 
 // TODO(Jace): Add custom animation table size
@@ -26,22 +32,6 @@ const u32 g_TotalSpriteStateCount[3] = {
 // so print to stdout per default, which is instant if it's directed to a file with ' > file.out'
 #define PRINT_TO_STDOUT TRUE
 
-typedef struct {
-    u32 *data;
-    s32 entryCount;
-} AnimationTable;
-
-typedef struct {
-    u32 *base; // Always(?) points backwards
-    s32 *cursor;
-    s32 subCount; // There can be multiple "sub animations" in one entry.
-} AnimationData;
-
-typedef struct {
-    FILE* header;
-    FILE* animTable;
-} OutFiles;
-
 // Identifiers
 #define AnimCmd_GetTiles        -1
 #define AnimCmd_GetPalette      -2
@@ -55,12 +45,13 @@ typedef struct {
 #define AnimCmd_10              -10
 #define AnimCmd_11              -11
 #define AnimCmd_12              -12
+#define ExCmd_UnusedPtr         (AnimCmd_12-1)
 
 const char* animCommands[] = {
     "AnimCmd_GetTiles",
     "AnimCmd_GetPalette",
     "AnimCmd_JumpBack",
-    "AnimCmd_4",
+    "AnimCmd_End",
     "AnimCmd_PlaySoundEffect",
     "AnimCmd_6",
     "AnimCmd_TranslateSprite",
@@ -69,13 +60,14 @@ const char* animCommands[] = {
     "AnimCmd_10",
     "AnimCmd_11",
     "AnimCmd_12",
+    "ExCmd_UnusedPtr",
 };
 
-const char* macroNames[] = {
+const char* macroNames[SizeofArray(animCommands)] = {
     "mGetTiles",
     "mGetPalette",
     "mJumpBack",
-    "mAnimCmd4",
+    "mEnd",
     "mPlaySoundEffect",
     "mAnimCmd6",
     "mTranslateSprite",
@@ -84,12 +76,13 @@ const char* macroNames[] = {
     "mAnimCmd10",
     "mAnimCmd11",
     "mAnimCmd12",
+    "mLonePointer",
 };
 
 // %s placeholders:
 // 1) Macro name      (e.g. 'mGetTiles')
 // 2) Cmd identifier  (e.g. 'AnimCmd_GetTiles')
-const char* macros[] = {
+const char* macros[SizeofArray(animCommands)] = {
     [~(AnimCmd_GetTiles)] =
         ".macro %s tile_index:req, num_tiles_to_copy:req\n"
         ".4byte %s\n"
@@ -172,9 +165,18 @@ const char* macros[] = {
         ".4byte %s\n"
         "  .4byte \\unk4\n"
         ".endm\n",
+    
+    [~(ExCmd_UnusedPtr)] =
+        ".macro %s romPtr:req\n"
+        "  .4byte \\romPtr\n"
+        ".endm\n",
+
 };
 
-static void printAnimationTable(u8* rom, AnimationTable* table, FILE* fileStream);
+static void printAnimationTable(FILE* fileStream, DynTable* dynTable, AnimationTable* animTable, LabelStrings* labels);
+static u16 countVariants(u8* rom, AnimationTable* animTable, u32 animId);
+static StringId pushLabel(LabelStrings* db, MemArena* stringArena, MemArena* offsetArena, char* label);
+
 
 static long int
 getFileSize(FILE* file) {
@@ -252,246 +254,208 @@ printFileHeader(FILE* fileStream, s32 entryCount) {
     // Print the number of entries in the table
     printHeaderLine(fileStream, entryCountName, entryCount, rightAlign);
     fprintf(fileStream, "\n\n");
+
+    // Macros depend on knowing the AnimCmd_xyz values, so they have to be printed together.
+    printMacros(fileStream);
 }
 
-bool
-wasReferencedBefore(AnimationTable *animTable, int entryIndex, int *prevIndex) {
-    s32 *cursor = animTable->data;
-    
-    bool wasReferencedBefore = FALSE;
-    
-    for(int index = 0; index < entryIndex; index++) {
-        if(cursor[index] == cursor[entryIndex]) {
-            wasReferencedBefore = TRUE;
-            
-            if(prevIndex)
-                *prevIndex = index;
-            
-            break;
-        }
+static char*
+getStringFromId(LabelStrings* label, StringId id) {
+    char* result = NULL;
+
+    if (id < label->count) {
+        result = &label->strings[label->offsets[id]];
     }
-    
-    return wasReferencedBefore;
+
+    return result;
 }
 
-static void* printCommand(FILE* fileStream, void* inCursor) {
-    s32* cursor = inCursor;
-
-    if (*cursor >= 0)
-        return cursor;
+static void
+printCommand(FILE* fileStream, DynTableAnimCmd* inAnimCmd, LabelStrings* labels) {
+    ACmd* inCmd = &inAnimCmd->cmd;
 
     // Print macro name
-    s32 cmdId = ~(*cursor);
-    fprintf(fileStream, "\t%s ", macroNames[cmdId]);
+    s32 nottedCmdId = ~(inCmd->cmdId);
+    if(nottedCmdId >= 0)
+        fprintf(fileStream, "\t%s ", macroNames[nottedCmdId]);
 
 
-    // Print the commands
-    switch (*cursor) {
+    // Print the command paramters
+    switch (inCmd->cmdId) {
     case AnimCmd_GetTiles: {
-        ACmd_GetTiles* cmd = inCursor;
-
+        ACmd_GetTiles* cmd = &inCmd->_tiles;
         fprintf(fileStream, "0x%X %d\n", cmd->tileIndex, cmd->numTilesToCopy);
-
-        cursor += AnimCommandSizeInWords(ACmd_GetTiles);
     } break;
 
     case AnimCmd_GetPalette: {
-        ACmd_GetPalette* cmd = inCursor;
-
+        ACmd_GetPalette* cmd = &inCmd->_pal;
         fprintf(fileStream, "0x%X %d 0x%X\n", cmd->palId, cmd->numColors, cmd->insertOffset);
-
-        cursor += AnimCommandSizeInWords(ACmd_GetPalette);
     } break;
 
     case AnimCmd_JumpBack: {
-        ACmd_JumpBack* cmd = inCursor;
-
-        fprintf(fileStream, "0x%X\n", cmd->offset);
-
-        cursor += AnimCommandSizeInWords(ACmd_JumpBack);
+        ExCmd_JumpBack* cmd = &inCmd->_exJump;
+        StringId targetLabel = ((DynTableAnimCmd*)cmd->jumpTarget)->label;
+        fprintf(fileStream, "((.-%s) / %zd)\n\n", getStringFromId(labels, targetLabel), sizeof(s32));
     } break;
 
     case AnimCmd_4: {
-        fprintf(fileStream, "\n");
-        cursor += AnimCommandSizeInWords(ACmd_4);
+        ACmd_4* cmd = &inCmd->_end;
+        fprintf(fileStream, "\n\n");
     } break;
 
     case AnimCmd_PlaySoundEffect: {
-        ACmd_PlaySoundEffect* cmd = inCursor;
-
+        ACmd_PlaySoundEffect* cmd = &inCmd->_sfx;
         fprintf(fileStream, "%u\n", cmd->songId);
-
-        cursor += AnimCommandSizeInWords(ACmd_PlaySoundEffect);
 
     } break;
 
     case AnimCmd_6: {
-        ACmd_6* cmd = inCursor;
-
+        ACmd_6* cmd = &inCmd->_6;
         fprintf(fileStream, "0x%X 0x%X\n", cmd->unk4, cmd->unk8);
-
-        cursor += AnimCommandSizeInWords(ACmd_6);
     } break;
 
     case AnimCmd_TranslateSprite: {
-        ACmd_TranslateSprite* cmd = inCursor;
-
+        ACmd_TranslateSprite* cmd = &inCmd->_translate;
         fprintf(fileStream, "%d %d\n", cmd->x, cmd->y);
-
-        cursor += AnimCommandSizeInWords(ACmd_TranslateSprite);
     } break;
 
     case AnimCmd_8: {
-        ACmd_8* cmd = inCursor;
-
+        ACmd_8* cmd = &inCmd->_8;
         fprintf(fileStream, "0x%x 0x%x", cmd->unk4, cmd->unk8);
-
-        cursor += AnimCommandSizeInWords(ACmd_8);
     } break;
 
     case AnimCmd_SetIdAndVariant: {
-        ACmd_SetIdAndVariant* cmd = inCursor;
+        ACmd_SetIdAndVariant* cmd = &inCmd->_animId;
 
         // TODO: Insert ANIM_<whatever> from "include/constants/animations.h"
         fprintf(fileStream, "%d %d\n", cmd->animId, cmd->variant);
-
-        cursor += AnimCommandSizeInWords(ACmd_SetIdAndVariant);
     } break;
 
     case AnimCmd_10: {
-        ACmd_10* cmd = inCursor;
-
+        ACmd_10* cmd = &inCmd->_10;
         fprintf(fileStream, "0x%x 0x%x 0x%x", cmd->unk4, cmd->unk8, cmd->unkC);
-
-        cursor += AnimCommandSizeInWords(ACmd_10);
     } break;
 
     case AnimCmd_11: {
-        ACmd_11* cmd = inCursor;
-
+        ACmd_11* cmd = &inCmd->_11;
         fprintf(fileStream, "0x%x", cmd->unk4);
-
-        cursor += AnimCommandSizeInWords(ACmd_11);
     } break;
 
     case AnimCmd_12: {
-        ACmd_12* cmd = inCursor;
-
+        ACmd_12* cmd = &inCmd->_12;
         fprintf(fileStream, "0x%x", cmd->unk4);
-
-        cursor += AnimCommandSizeInWords(ACmd_12);
     } break;
 
     default: {
-        // This shouldn't be reached.
-        fprintf(stderr, "Expoting failed, impossible state reached.\n");
-        exit(-1);
+        ACmd_UnkData* cmd = &inCmd->_unkData;
+        if (cmd->cmdId < 0) {
+            // This shouldn't be reached.
+            fprintf(stderr,
+                "Exporting failed, impossible state reached.\n"
+                "Animation Commands was invalid: %d", cmd->cmdId);
+            exit(-1);
+        }
+        else {
+            if (cmd->cmdId >= ROM_BASE || cmd->wordOrCmd >= ROM_BASE) {
+                // @TODO / @BUG! If we land here, that means a pointer was mistaken as an "unknown command"
+                fprintf(fileStream, "\t.4byte 0x%07X 0x%07X\n\n", cmd->cmdId, cmd->wordOrCmd);
+            } else
+                fprintf(fileStream, "\t.4byte %d %d\n\n", cmd->cmdId, cmd->wordOrCmd);
+        }
     }
     }
-
-    return cursor;
 }
 
-
 static void
-printAnimationDataFile(u8* rom, AnimationTable *animTable, OutFiles* outFiles) {
+printAnimationDataFile(FILE* fileStream, DynTable* dynTable,
+    LabelStrings* labels, MemArena *stringArena, MemArena* stringOffsetArena,
+    u32 numAnims, OutFiles* outFiles, int gameIndex) {
     AnimationData anim;
     
-    s32 *cursor = animTable->data;
-    
-    printFileHeader(outFiles->header, animTable->entryCount);
-    printMacros(outFiles->header);
+    printFileHeader(outFiles->header, numAnims);
 
     char filename[256];
 
-    for(int i = 0; i < animTable->entryCount; i++) {
-        if(cursor[i]) {
-            
-            if(wasReferencedBefore(animTable, i, 0))
-                continue;
-            
-#if !PRINT_TO_STDOUT
-            sprintf(filename, "out/anim_%04d.inc", i);
-            FILE* animFile = fopen(filename, "w");
-#else
-            FILE* animFile = NULL;
-#endif
-            if (animFile == NULL)
-                animFile = stdout;
+    DynTableAnim* table = dynTable->animations;
+    u16* variantCounts = dynTable->variantCounts;
 
-            anim.base   = romToVirtual(rom, cursor[i]);
-            anim.cursor = romToVirtual(rom, *anim.base);
-            
-            {// Get the number of sub-animations and store them in 'anim'
-                int subAnimCount = 0;
-                
-                for(;;) {
-                    s32 subAnimRomPtr = anim.base[subAnimCount];
-                    
-                    if(romToVirtual(rom, subAnimRomPtr) &&
-                       (&anim.base[subAnimCount] != animTable->data)) {
-                        subAnimCount++;
-                    } else {
-                        break;
+    for (int i = 0; i < numAnims; i++) {
+        if (table[i].offsetVariants) {
+            s32* variantOffsets = (s32*)PointerFromOffset(&table[i], table[i].offsetVariants);
+            u16 numVariants = variantCounts[i];
+
+            char labelBuffer[256];
+            char* animName = getStringFromId(labels, table[i].name);
+
+            // Print all variants' commands
+            for (int variantId = 0; variantId < numVariants; variantId++) {
+                // currCmd -> start of variant
+                s32* offset = &variantOffsets[variantId];
+                DynTableAnimCmd* currCmd = (DynTableAnimCmd*)PointerFromOffset(offset, *offset);
+
+                currCmd->flags |= ACMD_FLAG__IS_START_OF_ANIM;
+
+                int labelId = 0;
+                while (TRUE) {
+                    // Maybe print label
+
+                    if (currCmd->flags & (ACMD_FLAG__IS_START_OF_ANIM | currCmd->flags & ACMD_FLAG__NEEDS_LABEL)) {
+                        sprintf(labelBuffer, "%s__variant_%d_l%d", animName, variantId, labelId);
+
+                        StringId varLabel = pushLabel(labels, stringArena, stringOffsetArena, labelBuffer);
+                        currCmd->label = varLabel;
+                        fprintf(fileStream, "%s: @ %07X\n", labelBuffer, currCmd->address);
+                        labelId++;
+                        
                     }
+
+                    printCommand(fileStream, currCmd, labels);
+
+                    // Break loop after printing jump/end command
+                    if((currCmd->cmd.cmdId == AnimCmd_4)
+                    || (currCmd->cmd.cmdId == AnimCmd_JumpBack)
+                    || ((gameIndex == 1) && (currCmd->cmd.cmdId == AnimCmd_SetIdAndVariant)))
+                        break;
+
+                    currCmd++;
                 }
-                
-                anim.subCount = subAnimCount;
             }
 
-            fprintf(animFile, "\n");
-            int nextSubIndex = 0;
-            while((void*)anim.cursor < (void*)anim.base) {
-                bool cursorIsAtStartOfVariant = (anim.cursor == romToVirtual(rom, anim.base[nextSubIndex]));
+            { // Print variant pointers
+                fprintf(fileStream, "%s:\n", getStringFromId(labels, table[i].name));
+                for (int variantId = 0; variantId < numVariants; variantId++) {
 
-                if((nextSubIndex < anim.subCount) && cursorIsAtStartOfVariant) {
-                    
-                    // Label for sub animation
-                    fprintf(animFile,
-                            /*"\n.global anim_data__%04d_%d" // No need to make them global, right? */
-                            "\n"
-                            "anim_data__%04d_%d:\n", i, nextSubIndex);
-                    
-                    nextSubIndex++;
+                    sprintf(labelBuffer, "\t%s__variant_%d_l%d\n", animName, variantId, 0);
+                    fprintf(fileStream, labelBuffer);
                 }
-                
-                bool isCursorAtCmd = (*anim.cursor < 0 && *anim.cursor >= -12);
-                if (isCursorAtCmd) {
-                    anim.cursor = printCommand(animFile, anim.cursor);
-                } else {
-                    // NOTE(Jace): If instead of a command, the cursor finds a positive number
-                    //             it is some yet not documented pair of numbers, which get printed together.
-                    //             It does not matter, whether the 2nd number is positive or negative.
-
-                    fprintf(animFile, "\t.4byte\t%d, %d", anim.cursor[0], anim.cursor[1]);
-                    anim.cursor += 2;
-
-                    fprintf(animFile, "\n\n");
-                }
-                
+                fprintf(fileStream, "\n\n");
             }
-            
-            fprintf(animFile,
-                    "\n"
-                    "\n"
-                    "anim_%04d:\n", i);
-            
-            // Print (sub) animation pointer(s)
-            for(int subIndex = 0; subIndex < anim.subCount; subIndex++) {
-                fprintf(animFile, "\t.4byte anim_data__%04d_%d\n", i, subIndex);
-            }
-            
-            //fprintf(animFile, "\n\n\n");
-            if (animFile != NULL && animFile != stdout)
-                fclose(animFile);
         }
     }
-    
-    printAnimationTable(rom, animTable, outFiles->animTable);
+}
+
+static bool
+wasReferencedBefore(AnimationTable* animTable, int entryIndex, int* prevIndex) {
+    s32* cursor = animTable->data;
+
+    bool wasReferencedBefore = FALSE;
+
+    for (int index = 0; index < entryIndex; index++) {
+        if (cursor[index] == cursor[entryIndex]) {
+            wasReferencedBefore = TRUE;
+
+            if (prevIndex)
+                *prevIndex = index;
+
+            break;
+        }
+    }
+
+    return wasReferencedBefore;
 }
 
 static void
-printAnimationTable(u8 *rom, AnimationTable *table, FILE *fileStream) {
+printAnimationTable(FILE* fileStream, DynTable* dynTable, AnimationTable* table, LabelStrings* labels) {
     const char* animTableVarName = "gSpriteAnimations";
 
     fprintf(fileStream,
@@ -500,7 +464,8 @@ printAnimationTable(u8 *rom, AnimationTable *table, FILE *fileStream) {
             ".global %s\n"
             "%s:\n", animTableVarName, animTableVarName);
     
-    for(int i = 0; i < table->entryCount; i++) {
+    s32 numAnims = table->entryCount;
+    for(int i = 0; i < numAnims; i++) {
         if(table->data[i]) {
             int prevReferenceIndex;
             int animId = -1;
@@ -510,9 +475,10 @@ printAnimationTable(u8 *rom, AnimationTable *table, FILE *fileStream) {
             else
                 animId = i;
 
-            assert(animId >= 0 && animId < table->entryCount);
+            assert(animId >= 0 && animId < numAnims);
 
-            fprintf(fileStream, "\t.4byte anim_%04d\n", animId);
+            char* animName = getStringFromId(labels, dynTable->animations[animId].name);
+            fprintf(fileStream, "\t.4byte %s\n", animName);
         } else {
             fprintf(fileStream, "\t.4byte 0\n");
         }
@@ -580,6 +546,278 @@ u32* getAnimTableAddress(u8* rom, int gameIndex) {
     return result;
 }
 
+// Input:
+// NOTE: Indices can go from 0-255 -> count can be 256, so count has to be a u16
+static u16
+countVariants(u8* rom, AnimationTable* animTable, u32 animId) {
+    u16 count = 0;
+
+    RomPointer anim = animTable->data[animId];
+    if (anim != 0) {
+        RomPointer* variants = romToVirtual(rom, anim);
+
+        for (;;) {
+            // Check whether we're at a pointer,
+            // and not the beginning of 'animTable' (which points at the individual anims)
+            if((romToVirtual(rom, variants[count]) != NULL)
+/* SA1 corner-case */ && (romToVirtual(rom, variants[count]) < variants)
+            && (&variants[count] < animTable->data)) {
+                // Found another variant
+                count++;
+            }
+            else {
+                // No more variants found
+                break;
+            }
+        }
+    }
+
+    return count;
+}
+
+DynTableAnimCmd*
+fillVariantFromRom(MemArena* arena, u8* rom, const RomPointer* variantInRom) {
+    ACmd* cmdInRom = romToVirtual(rom, *variantInRom);   // A 'real' pointer to the current cmd inside the ROM
+    RomPointer cmdAddress = *variantInRom;               // The ROM pointer the current cmd is at
+
+    DynTableAnimCmd* variantStart = memArenaReserve(arena, sizeof(DynTableAnimCmd));
+    DynTableAnimCmd* currCmd = variantStart;
+
+    int romIndex = getRomIndex(rom);
+
+    bool breakLoop = FALSE;
+    while (!breakLoop && (void*)cmdInRom < (void*)variantInRom) {
+        currCmd->address = cmdAddress;
+
+        u32 structSize = 0;
+
+        if (cmdInRom->cmdId < 0) {
+            currCmd->cmd.cmdId = cmdInRom->cmdId;
+
+            switch (cmdInRom->cmdId) {
+            case AnimCmd_GetTiles:
+                currCmd->cmd._tiles.tileIndex      = cmdInRom->_tiles.tileIndex;
+                currCmd->cmd._tiles.numTilesToCopy = cmdInRom->_tiles.numTilesToCopy;
+                structSize = sizeof(ACmd_GetTiles);
+                break;
+
+            case AnimCmd_GetPalette:
+                currCmd->cmd._pal.palId        = cmdInRom->_pal.palId;
+                currCmd->cmd._pal.numColors    = cmdInRom->_pal.numColors;
+                currCmd->cmd._pal.insertOffset = cmdInRom->_pal.insertOffset;
+                structSize = sizeof(ACmd_GetPalette);
+                break;
+
+                // This sets the jump-address, to make it easier to
+                // find the commands needing a headline.
+            case AnimCmd_JumpBack:
+                currCmd->cmd._jump.offset = cmdInRom->_jump.offset;
+                currCmd->jmpTarget = cmdAddress - cmdInRom->_jump.offset*sizeof(s32);
+                structSize = sizeof(ACmd_JumpBack);
+
+                for (DynTableAnimCmd* check = variantStart; check < currCmd; check++) {
+                    if (check->address == currCmd->jmpTarget) {
+                        check->flags |= ACMD_FLAG__IS_POINTED_TO;
+
+                        StringId labelId = check->label;
+
+                        currCmd->cmd._exJump.jumpTarget = check;
+                        break;
+                    }
+                }
+
+                breakLoop = TRUE;
+                break;
+
+                // 'End' command
+            case AnimCmd_4:
+                structSize = sizeof(ACmd_4);
+                breakLoop = TRUE;
+                break;
+
+            case AnimCmd_PlaySoundEffect:
+                currCmd->cmd._sfx.songId = cmdInRom->_sfx.songId;
+                structSize = sizeof(ACmd_PlaySoundEffect);
+                break;
+
+
+            case AnimCmd_6:
+                currCmd->cmd._6.unk4 = cmdInRom->_6.unk4;
+                currCmd->cmd._6.unk8 = cmdInRom->_6.unk8;
+                structSize = sizeof(ACmd_6);
+                break;
+
+            case AnimCmd_TranslateSprite:
+                currCmd->cmd._translate.x = cmdInRom->_translate.x;
+                currCmd->cmd._translate.y = cmdInRom->_translate.y;
+                structSize = sizeof(ACmd_TranslateSprite);
+                break;
+
+            case AnimCmd_8:
+                currCmd->cmd._8.unk4 = cmdInRom->_8.unk4;
+                currCmd->cmd._8.unk8 = cmdInRom->_8.unk8;
+                structSize = sizeof(ACmd_8);
+                break;
+
+            case AnimCmd_SetIdAndVariant:
+                currCmd->cmd._animId.animId  = cmdInRom->_animId.animId;
+                currCmd->cmd._animId.variant = cmdInRom->_animId.variant;
+                structSize = sizeof(ACmd_SetIdAndVariant);
+
+                if (romIndex == 1)
+                    breakLoop = TRUE;
+                break;
+
+            case AnimCmd_10:
+                currCmd->cmd._10.unk4 = cmdInRom->_10.unk4;
+                currCmd->cmd._10.unk8 = cmdInRom->_10.unk8;
+                currCmd->cmd._10.unkC = cmdInRom->_10.unkC;
+                structSize = sizeof(ACmd_10);
+                break;
+                
+            case AnimCmd_11:
+                currCmd->cmd._11.unk4 = cmdInRom->_11.unk4;
+                structSize = sizeof(ACmd_11);
+                break;
+                
+            case AnimCmd_12:
+                currCmd->cmd._12.unk4 = cmdInRom->_12.unk4;
+                structSize = sizeof(ACmd_12);
+                break;
+
+            case ExCmd_UnusedPtr:
+                currCmd->cmd.cmdId = cmdInRom->cmdId;
+                // Setting a negative value should make it be ignored.
+                currCmd->cmd._unkData.wordOrCmd = -1;
+                structSize = sizeof(RomPointer);
+                break;
+            }
+        }
+        else {
+            // NOTE: If the "word" here is negative, it is actually a COMMAND!
+            //       A corner-case thanks to anim_0777 in SA1...
+            if (cmdInRom->cmdId > ROM_BASE) {
+                ;
+            }
+            else {
+                currCmd->cmd.cmdId = cmdInRom->cmdId;
+                currCmd->cmd._unkData.wordOrCmd = cmdInRom->_unkData.wordOrCmd;
+
+                structSize = sizeof(ACmd_UnkData);
+            }
+        }
+
+        cmdInRom = (ACmd*)(((u8*)cmdInRom) + structSize);
+        cmdAddress += structSize;
+
+        // Prevent an empty cmd getting allocated,
+        // when the loop is about to end
+        if(!breakLoop)
+            currCmd = memArenaReserve(arena, sizeof(DynTableAnimCmd));
+    }
+
+    return variantStart;
+}
+
+/* +--------------------------------------+
+   |  ---------  Data Layout  ---------   |
+   +--------------------------------------+
+   |  DynTableAnim[]                      |
+   +--------------------------------------+
+   |  u16[animCount] variantsPerAnim      |
+   +--------------------------------------+
+   | (s32)offsets -> each anim's variants |
+   |  / / / / / / / / / / / / / / / / / / |
+   | All commands, for each variant       |
+   +--------------------------------------+
+*/
+static void
+createDynamicAnimTable(MemArena* arena, u8* rom, AnimationTable *animTable, DynTable* dynTable) {
+    u32 animCount = animTable->entryCount;
+
+    DynTableAnim* table = NULL;
+    u16* variantsPerAnim = NULL;
+    DynTableAnimCmd* variantStart = NULL;
+
+    // Init the table and ensure there's enough space in memory
+    table = memArenaReserve(arena, animCount * sizeof(DynTableAnim));
+
+    // Count the number of variants of each animation
+    variantsPerAnim = memArenaReserve(arena, animCount * sizeof(u16));
+    for (u32 animId = 0; animId < animCount; animId++)
+        variantsPerAnim[animId] = countVariants(rom, animTable, animId);
+
+
+    // Convert all the commands of each animation into a format that lets us easily modify it.
+    for (int animationId = 0; animationId < animCount; animationId++) {
+        RomPointer animPointer = animTable->data[animationId];
+        if (animPointer == 0)
+            continue;
+
+        RomPointer *variantsInRom = romToVirtual(rom, animPointer);
+
+        // allocate offsets of each variant
+        s32* variantOffsets = memArenaReserve(arena, variantsPerAnim[animationId] * sizeof(u32));
+        table[animationId].offsetVariants = (s32)((u8*)variantOffsets - (u8*)&table[animationId]);
+
+
+        // - iterate through all variants of the current animation
+        // - flag commands that are pointed at by jumps.
+        // - set offset to each variant
+        u16 numVariants = variantsPerAnim[animationId];
+        for (u16 variantId = 0; variantId < numVariants; variantId++) {
+            variantStart = fillVariantFromRom(arena, rom, &variantsInRom[variantId]);
+
+            s32 offset = (s32)(((u8*)variantStart) - (u8*)&variantOffsets[variantId]);
+            variantOffsets[variantId] = offset;
+        }
+
+        // SA1 cornercase, of a pointer pointing at
+        // supposedly deleted variant, without a replacement "End" command.
+        if((variantsInRom[numVariants] >= ROM_BASE)
+        && (&variantsInRom[numVariants] < animTable->data)){
+
+        }
+    }
+    
+    dynTable->animations = table;
+    dynTable->variantCounts = variantsPerAnim;
+}
+
+static StringId
+pushLabel(LabelStrings* db, MemArena* stringArena, MemArena* offsetArena, char* label) {
+    char* string = memArenaAddString(stringArena, label);
+    s32* offset  = memArenaReserve(offsetArena, sizeof(s32));
+    *offset = (s32)(string - stringArena->memory);
+    db->count++;
+
+    return db->count - 1;
+}
+
+static void
+createAnimLabels(DynTable* table, u32 numAnimations, LabelStrings* labels, MemArena* stringArena, MemArena* stringOffsetArena) {
+    labels->strings = stringArena->memory;
+    labels->offsets = stringOffsetArena->memory;
+    labels->count   = 0;
+
+    // Push empty string as "Dummy" value.
+    pushLabel(labels, stringArena, stringOffsetArena, "");
+
+    // Load animation-name labels
+    // TODO: Implement loading main animation-labels from file.
+    char buffer[256];
+    for (u32 animId = 0; animId < numAnimations; animId++) {
+        if (table->animations[animId].offsetVariants != 0) {
+            sprintf(buffer, "anim_%04d", animId);
+            StringId stringId = pushLabel(labels, stringArena, stringOffsetArena, buffer);
+            table->animations[animId].name = stringId;
+        }
+    }
+
+    labels->strings = stringArena->memory;
+    labels->offsets = stringOffsetArena->memory;
+}
+
 int main(int argCount, char** args) {
     int result = 0;
 
@@ -617,7 +855,7 @@ int main(int argCount, char** args) {
 
                     OutFiles files = { 0 };
 #if !PRINT_TO_STDOUT
-                    files.header      = fopen("out/macros.inc", "w");
+                    files.header    = fopen("out/macros.inc", "w");
                     files.animTable = fopen("out/animation_table.inc", "w");
 #endif
                     if (!files.header)
@@ -625,7 +863,30 @@ int main(int argCount, char** args) {
 
                     if (!files.animTable)
                         files.animTable = stdout;
-                    printAnimationDataFile(rom, &animTable, &files);
+
+                    MemArena mtableArena;
+                    memArenaInit(&mtableArena);
+                    
+                    MemArena stringOffsetArena;
+                    memArenaInit(&stringOffsetArena);
+                    
+                    MemArena stringArena;
+                    memArenaInit(&stringArena);
+
+                    DynTable dynTable = { 0 };
+                    createDynamicAnimTable(&mtableArena, rom, &animTable, &dynTable);
+
+                    // Generates the names for the animations themselves
+                    LabelStrings labels = { 0 };
+                    createAnimLabels(&dynTable, animTable.entryCount, &labels, &stringArena, &stringOffsetArena);
+
+                    int k = 123;
+
+                    int gameIndex = getRomIndex(rom);
+                    printAnimationDataFile(stdout, &dynTable, &labels, &stringArena, &stringOffsetArena, animTable.entryCount, &files, gameIndex);
+
+
+                    printAnimationTable(stdout, &dynTable, &animTable, &labels);
 
                     if(files.animTable != NULL && files.animTable != stdout)
                         fclose(files.animTable);
@@ -640,7 +901,7 @@ int main(int argCount, char** args) {
             }
         } else {
             fprintf(stderr, "Could not open file '%s'. Code: %d\n", args[1], errno);
-            result = -2;
+            result = -3;
         }
     }
     return result;
