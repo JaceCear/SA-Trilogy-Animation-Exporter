@@ -30,7 +30,7 @@ const u32 g_TotalSpriteStateCount[3] = {
 
 // Creating separate files for each animation takes a lot of time (4 seconds for me),
 // so print to stdout per default, which is instant if it's directed to a file with ' > file.out'
-#define PRINT_TO_STDOUT !TRUE
+#define PRINT_TO_STDOUT TRUE
 
 // Identifiers
 #define AnimCmd_GetTiles        -1
