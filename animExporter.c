@@ -371,7 +371,7 @@ printCommand(FILE* fileStream, DynTableAnimCmd* inAnimCmd, LabelStrings* labels)
                 fprintf(fileStream, "\t.4byte 0x%07X, 0x%07X\n\n", cmd->displayForNFrames, cmd->frameIndex);
                 assert(FALSE);
             } else
-                fprintf(fileStream, "%d %d\n\n", cmd->displayForNFrames, cmd->frameIndex);
+                fprintf(fileStream, "0x%X 0x%X\n\n", cmd->displayForNFrames, cmd->frameIndex);
         }
     }
     }
