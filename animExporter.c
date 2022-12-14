@@ -422,11 +422,14 @@ printAnimationDataFile(FILE* fileStream, DynTable* dynTable,
             }
 
             { // Print variant pointers
-                fprintf(fileStream, "%s:\n", getStringFromId(labels, table[i].name));
+                char* entryName = getStringFromId(labels, table[i].name);
+                if(entryName)
+                    fprintf(fileStream, "%s:\n", entryName);
                 for (int variantId = 0; variantId < numVariants; variantId++) {
 
                     sprintf(labelBuffer, "\t%s__variant_%d_l%d\n", animName, variantId, 0);
-                    fprintf(fileStream, labelBuffer);
+                    char* labelAsString = labelBuffer;
+                    fprintf(fileStream, labelAsString, "");
                 }
                 fprintf(fileStream, "\n\n");
             }
@@ -560,7 +563,7 @@ countVariants(u8* rom, AnimationTable* animTable, u32 animId) {
             // Check whether we're at a pointer,
             // and not the beginning of 'animTable' (which points at the individual anims)
             if((romToVirtual(rom, variants[count]) != NULL)
-/* SA1 corner-case */ && (romToVirtual(rom, variants[count]) < variants)
+/* SA1 corner-case */ && ((RomPointer*)romToVirtual(rom, variants[count]) < variants)
             && (&variants[count] < animTable->data)) {
                 // Found another variant
                 count++;
@@ -788,7 +791,7 @@ static StringId
 pushLabel(LabelStrings* db, MemArena* stringArena, MemArena* offsetArena, char* label) {
     char* string = memArenaAddString(stringArena, label);
     s32* offset  = memArenaReserve(offsetArena, sizeof(s32));
-    *offset = (s32)(string - stringArena->memory);
+    *offset = (s32)(string - (char*)stringArena->memory);
     db->count++;
 
     return db->count - 1;
