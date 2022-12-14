@@ -294,8 +294,11 @@ printCommand(FILE* fileStream, DynTableAnimCmd* inAnimCmd, LabelStrings* labels)
 
     case AnimCmd_JumpBack: {
         ExCmd_JumpBack* cmd = &inCmd->_exJump;
+        StringId jmpCmdLabel = inAnimCmd->label;
         StringId targetLabel = ((DynTableAnimCmd*)cmd->jumpTarget)->label;
-        fprintf(fileStream, "((.-%s) / %zd)\n\n", getStringFromId(labels, targetLabel), sizeof(s32));
+        char* jmpCmdString = getStringFromId(labels, jmpCmdLabel);
+        char* targetCmdString = getStringFromId(labels, targetLabel);
+        fprintf(fileStream, "((%s-%s) / %zd)\n\n", jmpCmdString, targetCmdString, sizeof(s32));
     } break;
 
     case AnimCmd_4: {
@@ -358,9 +361,9 @@ printCommand(FILE* fileStream, DynTableAnimCmd* inAnimCmd, LabelStrings* labels)
         else {
             if (cmd->cmdId >= ROM_BASE || cmd->wordOrCmd >= ROM_BASE) {
                 // @TODO / @BUG! If we land here, that means a pointer was mistaken as an "unknown command"
-                fprintf(fileStream, "\t.4byte 0x%07X 0x%07X\n\n", cmd->cmdId, cmd->wordOrCmd);
+                fprintf(fileStream, "\t.4byte 0x%07X, 0x%07X\n\n", cmd->cmdId, cmd->wordOrCmd);
             } else
-                fprintf(fileStream, "\t.4byte %d %d\n\n", cmd->cmdId, cmd->wordOrCmd);
+                fprintf(fileStream, "\t.4byte %d, %d\n\n", cmd->cmdId, cmd->wordOrCmd);
         }
     }
     }
@@ -426,7 +429,7 @@ printAnimationDataFile(FILE* fileStream, DynTable* dynTable,
                 if(entryName)
                     fprintf(fileStream, "%s:\n", entryName);
                 for (int variantId = 0; variantId < numVariants; variantId++) {
-                    fprintf(fileStream, "\t%s__variant_%d_l%d\n", animName, variantId, 0);
+                    fprintf(fileStream, "\t.4byte %s__variant_%d_l%d\n", animName, variantId, 0);
                 }
                 fprintf(fileStream, "\n\n");
             }
@@ -614,6 +617,9 @@ fillVariantFromRom(MemArena* arena, u8* rom, const RomPointer* variantInRom) {
                 currCmd->cmd._jump.offset = cmdInRom->_jump.offset;
                 currCmd->jmpTarget = cmdAddress - cmdInRom->_jump.offset*sizeof(s32);
                 structSize = sizeof(ACmd_JumpBack);
+
+                // We will use this label to calculate the offset for the jump
+                currCmd->flags |= ACMD_FLAG__NEEDS_LABEL;
 
                 for (DynTableAnimCmd* check = variantStart; check < currCmd; check++) {
                     if (check->address == currCmd->jmpTarget) {
