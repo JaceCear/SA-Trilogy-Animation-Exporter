@@ -17,15 +17,19 @@
 #define PointerFromOffset(base, offset) (((u8*)(base)) + (offset))
 
 
-// TODO(Jace): Add custom animation table size
+// TODO(Jace): Allow for custom animation table size
 #define SA1_ANIMATION_COUNT    908
 #define SA2_ANIMATION_COUNT    1133
 #define SA3_ANIMATION_COUNT    1524
 
-const u32 g_TotalAnimationCount[3] = {
-    SA1_ANIMATION_COUNT,
-    SA2_ANIMATION_COUNT,
-    SA3_ANIMATION_COUNT,
+#define KATAM_ANIMATION_COUNT  939
+
+const u32 g_TotalAnimationCount[] = {
+    /*  1 */ [GAME_SA1] = SA1_ANIMATION_COUNT,
+    /*  2 */ [GAME_SA2] = SA2_ANIMATION_COUNT,
+    /*  3 */ [GAME_SA3] = SA3_ANIMATION_COUNT,
+
+    /* 10 */ [GAME_KATAM] = KATAM_ANIMATION_COUNT,
 };
 
 // Creating separate files for each animation takes a lot of time (4 seconds for me),
@@ -507,20 +511,21 @@ getRomIndex(u8* rom) {
     int result = 0;
 
     if (!strncmp((rom + 0xA0), "SONIC ADVANCASOP", 16ul)) {
-        // Strings are equal, and it's SA1, so return 1
-        result = 1;
+        result = GAME_SA1;
     }
 
     if(!strncmp((rom + 0xA0), "SONICADVANC2A2N", 15ul) // NTSC
     || !strncmp((rom + 0xA0), "SONIC ADVANCA2N", 15ul) // PAL
         ) {
-        // Strings are equal, and it's SA2, so return 2
-        result = 2;
+        result = GAME_SA2;
     }
 
     if (!strncmp((rom + 0xA0), "SONIC ADVANCB3SP8P", 18ul)) {
-        // Strings are equal, and it's SA3, so return 3
-        result = 3;
+        result = GAME_SA3;
+    }
+    
+    if (!strncmp((rom + 0xA0), "AGB KIRBY AMB8KP", 16ul)) {
+        result = GAME_KATAM;
     }
 
     return result;
@@ -550,6 +555,13 @@ u32* getAnimTableAddress(u8* rom, int gameIndex) {
         result = romToVirtual(rom, *result);
 
     } break;
+
+    // Kirby ATAM
+    case 10: {
+        result = romToVirtual(rom, 0x080002E0); // (PAL, maybe others?)
+        result = romToVirtual(rom, *result);
+        result = romToVirtual(rom, *result);
+    }
 
     default: {
         ;
@@ -595,8 +607,6 @@ fillVariantFromRom(MemArena* arena, u8* rom, const RomPointer* variantInRom) {
 
     DynTableAnimCmd* variantStart = memArenaReserve(arena, sizeof(DynTableAnimCmd));
     DynTableAnimCmd* currCmd = variantStart;
-
-    int romIndex = getRomIndex(rom);
 
     bool breakLoop = FALSE;
     while (!breakLoop && (void*)cmdInRom < (void*)variantInRom) {
@@ -884,7 +894,7 @@ int main(int argCount, char** args) {
                     // SA2 anim table should be: 0x08135EC4
 
                     animTable.data = address;
-                    animTable.entryCount = g_TotalAnimationCount[romIndex - 1];
+                    animTable.entryCount = g_TotalAnimationCount[romIndex];
 
                     OutFiles files = { 0 };
 #if !PRINT_TO_STDOUT

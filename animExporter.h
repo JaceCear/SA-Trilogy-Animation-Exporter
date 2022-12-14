@@ -1,6 +1,10 @@
 #ifndef GUARD_ANIM_EXPORTER_H
 #define GUARD_ANIM_EXPORTER_H
 
+#define GAME_SA1            1
+#define GAME_SA2            2
+#define GAME_SA3            3
+#define GAME_KATAM          10 // Kirby & the Amazing Mirror
 
 typedef struct {
     RomPointer* data;
