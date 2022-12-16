@@ -1,5 +1,10 @@
 # SA-Trilogy-Animation-Exporter
-Tool to extract animation data out of any of the Sonic Advance 1-3 ROMs.
+Tool to extract animation data out of:
+- Sonic Advance 1 (PAL)
+- Sonic Advance 2 (PAL, NTSC)
+- Sonic Advance 3 (all?)
+- Kirby & the Amazing Mirror (PAL)
+
 I've had this laying around for a while, and I thought it'd be helpful to clean it up a little and push it.
 
 In case you use it for a project, I'd highly appreciate a shoutout! :)
