@@ -1138,7 +1138,7 @@ int main(int argCount, char** args) {
     animTable.data = spriteTables.animations;
     animTable.entryCount = g_TotalAnimationCount[game];
 
-    OutFiles files = { 0 };
+    OutFiles files = { stdout, stdout };
 #if !PRINT_TO_STDOUT
     // Create output directories
     MemArena paths;
@@ -1159,11 +1159,6 @@ int main(int argCount, char** args) {
     files.header    = fopen(headerFilePath, "w");
     files.animTable = fopen(animationTableFilePath, "w");
 #endif
-    if (!files.header)
-        files.header = stdout;
-
-    if (!files.animTable)
-        files.animTable = stdout;
 
     MemArena mtableArena;
     memArenaInit(&mtableArena);
@@ -1238,8 +1233,8 @@ int main(int argCount, char** args) {
     int colorsPerPalette = 16;
     int paletteCount = ((spriteTables.tiles_4bpp - (u8*)spriteTables.palettes) / (2*colorsPerPalette));
 
-    char* fileName = addToPath(&paths, palettePath, "pal_XXXXXX.gbapal");
-    fileName = lastString(fileName, "pal_");
+    filePath = addToPath(&paths, palettePath, "pal_XXXXXX.gbapal");
+    char* fileName = lastString(filePath, "pal_");
     // Output every palette as its own file.
     for (int i = 0; i < paletteCount; i++) {
 
@@ -1248,7 +1243,7 @@ int main(int argCount, char** args) {
         memcpy(&paletteBuffer, pal, 2 * 16);
 
         sprintf(fileName, "pal_%03d.gbapal", i);
-        FILE* palFile = fopen(palettePath, "wb");
+        FILE* palFile = fopen(filePath, "wb");
         fwrite(paletteBuffer, 2, 16, palFile);
         fclose(palFile);
     }
