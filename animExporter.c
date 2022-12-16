@@ -3,6 +3,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#ifdef _MSC_VER
+#include <direct.h>
+#define mkdir _mkdir
+#else
+#include <sys/stat.h>
+#define mkdir(a) { mode_t perms = 666; mkdir((a), perms); }
+#endif
+#include <math.h> // for sqrtf
+
 
 #include "types.h"
 #include "arenaAlloc.h"
@@ -14,7 +23,7 @@
 
 #define SizeofArray(array) ((sizeof(array)) / (sizeof(array[0])))
 
-#define PointerFromOffset(base, offset) (((u8*)(base)) + (offset))
+#define OffsetPointer(ptrToOffset) (((u8*)(ptrToOffset)) + *(ptrToOffset))
 
 
 // TODO(Jace): Allow for custom animation table size
@@ -25,16 +34,16 @@
 #define KATAM_ANIMATION_COUNT  939
 
 const u32 g_TotalAnimationCount[] = {
-    /*  1 */ [GAME_SA1] = SA1_ANIMATION_COUNT,
-    /*  2 */ [GAME_SA2] = SA2_ANIMATION_COUNT,
-    /*  3 */ [GAME_SA3] = SA3_ANIMATION_COUNT,
+    /*  1 */ [SA1] = SA1_ANIMATION_COUNT,
+    /*  2 */ [SA2] = SA2_ANIMATION_COUNT,
+    /*  3 */ [SA3] = SA3_ANIMATION_COUNT,
 
-    /* 10 */ [GAME_KATAM] = KATAM_ANIMATION_COUNT,
+    /* 10 */ [KATAM] = KATAM_ANIMATION_COUNT,
 };
 
 // Creating separate files for each animation takes a lot of time (4 seconds for me),
 // so print to stdout per default, which is instant if it's directed to a file with ' > file.out'
-#define PRINT_TO_STDOUT TRUE
+#define PRINT_TO_STDOUT FALSE
 
 // Identifiers
 #define AnimCmd_GetTiles        -1
@@ -65,7 +74,7 @@ const char* animCommands[] = {
     "AnimCmd_11",
     "AnimCmd_12",
 
-    // This is NOT a "real" command, but a
+    // NOTE(Jace): This is NOT a "real" command, but a
     // notification for the game that it should
     // display a specfic frame, and for how long.
     // Thanks to @MainMemory_ for reminding me on how they work!
@@ -128,10 +137,10 @@ const char* macros[SizeofArray(animCommands)] = {
 
     // TODO: Parameters might be wrong
     [~(AnimCmd_6)] =
-        ".macro %s unk4:req, unk8:req\n"
+        ".macro %s unk4:req, unk8:req, unk9:req, unkA:req, unkB:req\n"
         ".4byte %s\n"
         "  .4byte \\unk4\n"
-        "  .4byte \\unk8\n"
+        "  .byte \\unk8, \\unk9, \\unkA, \\unkB\n"
         ".endm\n",
 
     [~(AnimCmd_TranslateSprite)] =
@@ -226,7 +235,7 @@ printHeaderLine(FILE* fileStream, const char* name, int value, int rightAlign) {
     s16 indentSpaces = rightAlign - strlen(name);
     for (; indentSpaces > 0; indentSpaces--)
         fprintf(fileStream, " ");
-
+    
     // Print the value
     fprintf(fileStream, "%d\n", value);
 }
@@ -326,7 +335,8 @@ printCommand(FILE* fileStream, DynTableAnimCmd* inAnimCmd, LabelStrings* labels)
 
     case AnimCmd_6: {
         ACmd_6* cmd = &inCmd->_6;
-        fprintf(fileStream, "0x%X 0x%X\n", cmd->unk4, cmd->unk8);
+        fprintf(fileStream, "0x%X 0x%X 0x%X 0x%X 0x%X\n",
+            cmd->unk4.unk0, cmd->unk4.unk4, cmd->unk4.unk5, cmd->unk4.unk6, cmd->unk4.unk7);
     } break;
 
     case AnimCmd_TranslateSprite: {
@@ -397,7 +407,7 @@ printAnimationDataFile(FILE* fileStream, DynTable* dynTable,
 
     for (int i = 0; i < numAnims; i++) {
         if (table[i].offsetVariants >= 0) {
-            s32* variantOffsets = (s32*)PointerFromOffset(&table[i], table[i].offsetVariants);
+            s32* variantOffsets = (s32*)OffsetPointer(&table[i].offsetVariants);
             u16 numVariants = variantCounts[i];
 
             char labelBuffer[256];
@@ -407,7 +417,7 @@ printAnimationDataFile(FILE* fileStream, DynTable* dynTable,
             for (int variantId = 0; variantId < numVariants; variantId++) {
                 // currCmd -> start of variant
                 s32* offset = &variantOffsets[variantId];
-                DynTableAnimCmd* currCmd = (DynTableAnimCmd*)PointerFromOffset(offset, *offset);
+                DynTableAnimCmd* currCmd = (DynTableAnimCmd*)OffsetPointer(offset);
 
                 currCmd->flags |= ACMD_FLAG__IS_START_OF_ANIM;
 
@@ -415,7 +425,7 @@ printAnimationDataFile(FILE* fileStream, DynTable* dynTable,
                 while (TRUE) {
                     // Maybe print label
 
-                    if (currCmd->flags & (ACMD_FLAG__IS_START_OF_ANIM | currCmd->flags & ACMD_FLAG__NEEDS_LABEL)) {
+                    if (currCmd->flags & (ACMD_FLAG__IS_START_OF_ANIM | ACMD_FLAG__NEEDS_LABEL)) {
                         sprintf(labelBuffer, "%s__variant_%d_l%d", animName, variantId, labelId);
 
                         StringId varLabel = pushLabel(labels, stringArena, stringOffsetArena, labelBuffer);
@@ -508,31 +518,31 @@ printAnimationTable(FILE* fileStream, DynTable* dynTable, AnimationTable* table,
 // TODO: Check a few more things in the ROM Header
 static int
 getRomIndex(u8* rom) {
-    int result = 0;
+    eGame result = UNKNOWN;
 
     if (!strncmp((rom + 0xA0), "SONIC ADVANCASOP", 16ul)) {
-        result = GAME_SA1;
+        result = SA1;
     }
 
     if(!strncmp((rom + 0xA0), "SONICADVANC2A2N", 15ul) // NTSC
     || !strncmp((rom + 0xA0), "SONIC ADVANCA2N", 15ul) // PAL
         ) {
-        result = GAME_SA2;
+        result = SA2;
     }
 
     if (!strncmp((rom + 0xA0), "SONIC ADVANCB3SP8P", 18ul)) {
-        result = GAME_SA3;
+        result = SA3;
     }
     
     if (!strncmp((rom + 0xA0), "AGB KIRBY AMB8K", 15ul)) {
-        result = GAME_KATAM;
+        result = KATAM;
     }
 
     return result;
 }
 
-u32* getAnimTableAddress(u8* rom, int gameIndex) {
-    u32* result = NULL;
+void getSpriteTables(u8* rom, int gameIndex, SpriteTables* tables) {
+    RomPointer* result = NULL;
 
     char region = getRomRegion(rom);
 
@@ -541,17 +551,15 @@ u32* getAnimTableAddress(u8* rom, int gameIndex) {
         //SA1 (PAL)
         result = romToVirtual(rom, 0x0801A78C); // SA1(PAL)
         result = romToVirtual(rom, *result);
-        result = romToVirtual(rom, *result);
     } break;
 
     case 2: {
-        result = romToVirtual(rom, 0x080113E8); // SA2(PAL, NTSC)
+        result = romToVirtual(rom, 0x0801A5DC); // SA2(PAL, NTSC)
         result = romToVirtual(rom, *result);
     } break;
 
     case 3: {
         result = romToVirtual(rom, 0x08000404);// SA3(PAL, NTSC)
-        result = romToVirtual(rom, *result);
         result = romToVirtual(rom, *result);
 
     } break;
@@ -560,15 +568,21 @@ u32* getAnimTableAddress(u8* rom, int gameIndex) {
     case 10: {
         result = romToVirtual(rom, 0x080002E0); // (PAL, maybe others?)
         result = romToVirtual(rom, *result);
-        result = romToVirtual(rom, *result);
     }
 
     default: {
-        ;
+        memset(tables, 0, sizeof(*tables));
     }
     }
 
-    return result;
+    SpriteTablesROM* romTable = (SpriteTablesROM*)result;
+
+    tables->animations = romToVirtual(rom, romTable->animations);
+    tables->dimensions = romToVirtual(rom, romTable->dimensions);
+    tables->oamData    = romToVirtual(rom, romTable->oamData);
+    tables->palettes   = romToVirtual(rom, romTable->palettes);
+    tables->tiles_4bpp = romToVirtual(rom, romTable->tiles_4bpp);
+    tables->tiles_8bpp = romToVirtual(rom, romTable->tiles_8bpp);
 }
 
 // Input:
@@ -668,8 +682,11 @@ fillVariantFromRom(MemArena* arena, u8* rom, const RomPointer* variantInRom) {
 
 
             case AnimCmd_6:
-                currCmd->cmd._6.unk4 = cmdInRom->_6.unk4;
-                currCmd->cmd._6.unk8 = cmdInRom->_6.unk8;
+                currCmd->cmd._6.unk4.unk0 = cmdInRom->_6.unk4.unk0;
+                currCmd->cmd._6.unk4.unk4 = cmdInRom->_6.unk4.unk4;
+                currCmd->cmd._6.unk4.unk5 = cmdInRom->_6.unk4.unk5;
+                currCmd->cmd._6.unk4.unk6 = cmdInRom->_6.unk4.unk6;
+                currCmd->cmd._6.unk4.unk7 = cmdInRom->_6.unk4.unk7;
                 structSize = sizeof(ACmd_6);
                 break;
 
@@ -845,7 +862,7 @@ createAnimLabels(DynTable* table, u32 numAnimations, LabelStrings* labels, MemAr
 
             // (offset < 0) -> references previous entry, 
             if (current->offsetVariants < 0) {
-                DynTableAnim* previous = (DynTableAnim*)PointerFromOffset(current, current->offsetVariants);
+                DynTableAnim* previous = (DynTableAnim*)OffsetPointer(&current->offsetVariants);
 
                 stringId = previous->name;
             }
@@ -861,88 +878,392 @@ createAnimLabels(DynTable* table, u32 numAnimations, LabelStrings* labels, MemAr
     labels->offsets = stringOffsetArena->memory;
 }
 
-int main(int argCount, char** args) {
-    int result = 0;
+typedef void (*CmdIterator)(FILE* fileStream, DynTableAnimCmd* cmd, u16 animId, u16 variantId, u16 labelId, void* itParams);
 
-    if(argCount != 2 || !strcmp(args[1], "-h") || !strcmp(args[1], "--help")) {
-        printf("This program can be used to extract animation data from the Sonic Advance games.\n"
-               "Currently only a single file gets put out through stdout, but in the future this might change.\n\n");
-        
-        printf("Please add the path to a Sonic Advance 1|2|3 ROM file as a parameter.\n");
-        printf("%s <SA3 ROM>\n", args[0]);
-        result = -1;
-    } else {
-        FILE* romFile = fopen(args[1], "rb");
-        u8 *rom = 0;
-        int fileSize = 0;
-        AnimationTable animTable = {0};
-        
-        if(romFile) {
-            fileSize = getFileSize(romFile);
-            rom = (u8*)malloc(fileSize);
-            
-            fseek(romFile, 0, SEEK_SET);
-            if (fread(rom, 1, fileSize, romFile) == fileSize) {
-                fclose(romFile);
+// Go through every command that was found in the game and pass it to 'iterator' function.
+void iterateAllCommands(FILE* fileStream, DynTable *dynTable, u16 startAnimId, u16 endAnimId, CmdIterator iterator, void* iteratorParams) {
+    for (int animId = startAnimId; animId < endAnimId; animId++) {
+        DynTableAnim* anim = &dynTable->animations[animId];
 
-                int romIndex = getRomIndex(rom);
-                if (romIndex) {
-                    // 0x08000404: Points to animation data struct in SA3
-                    u32* address = getAnimTableAddress(rom, romIndex);
+        // Already gone over this anim
+        if (anim->offsetVariants < 0)
+            continue;
 
-                    // 0x080113E8 -> anim table
-                    // SA2 anim table should be: 0x08135EC4
+        s32* variOffsets = (s32*)OffsetPointer(&anim->offsetVariants);
+        u16 variantCount = dynTable->variantCounts[animId];
+        for (int variantId = 0; variantId < variantCount; variantId++) {
+            DynTableAnimCmd* dtCmd = (DynTableAnimCmd*)OffsetPointer(&variOffsets[variantId]);
 
-                    animTable.data = address;
-                    animTable.entryCount = g_TotalAnimationCount[romIndex];
+            int labelId = 0;
+            while (TRUE) {
+                iterator(fileStream, dtCmd, animId, variantId, labelId, iteratorParams);
 
-                    OutFiles files = { 0 };
-#if !PRINT_TO_STDOUT
-                    files.header    = fopen("out/macros.inc", "w");
-                    files.animTable = fopen("out/animation_table.inc", "w");
-#endif
-                    if (!files.header)
-                        files.header = stdout;
+                dtCmd++;
 
-                    if (!files.animTable)
-                        files.animTable = stdout;
-
-                    MemArena mtableArena;
-                    memArenaInit(&mtableArena);
-                    
-                    MemArena stringOffsetArena;
-                    memArenaInit(&stringOffsetArena);
-                    
-                    MemArena stringArena;
-                    memArenaInit(&stringArena);
-
-                    DynTable dynTable = { 0 };
-                    createDynamicAnimTable(&mtableArena, rom, &animTable, &dynTable);
-
-                    // Generates the names for the animations themselves
-                    LabelStrings labels = { 0 };
-                    createAnimLabels(&dynTable, animTable.entryCount, &labels, &stringArena, &stringOffsetArena);
-
-                    printAnimationDataFile(stdout, &dynTable, &labels, &stringArena, &stringOffsetArena, animTable.entryCount, &files);
-
-
-                    printAnimationTable(files.animTable, &dynTable, &animTable, &labels);
-
-                    if(files.animTable != NULL && files.animTable != stdout)
-                        fclose(files.animTable);
-
-                    if (files.header != NULL && files.header != stdout)
-                        fclose(files.header);
-                }
+                if((dtCmd->cmd.cmdId == AnimCmd_4)
+                || (dtCmd->cmd.cmdId == AnimCmd_JumpBack)
+                //|| (dtCmd->cmd.cmdId == AnimCmd_SetIdAndVariant)
+                || (dtCmd->cmd.cmdId < AnimCmd_12))
+                    break;
             }
-            else {
-                fprintf(stderr, "File '%s' couldn't be fully loaded.\n", args[1]);
-                result = -2;
-            }
-        } else {
-            fprintf(stderr, "Could not open file '%s'. Code: %d\n", args[1], errno);
-            result = -3;
         }
     }
-    return result;
+}
+
+typedef struct {
+    s32 firstTileId;
+    u32 minRange;
+    s32 paletteId;
+} TileRange;
+
+typedef struct {
+    MemArena* tileRanges;
+
+    // Tiles
+    u32 numGetTileCalls;
+    u32 numTileIndices;
+
+    // Palette
+    s32 cachedPaletteId;
+    s16 cachedNumColors;
+    s16 cachedInsertOffset;
+
+    s16 cachedWidth;
+    s16 cachedHeight;
+} TileInfo;
+
+void itGetNumTileInformation(FILE* fileStream, DynTableAnimCmd* dtCmd, u16 animId, u16 variantId, u16 labelId, void* itParams) {
+    TileInfo* tileInfo = (TileInfo*)itParams;
+
+    if (dtCmd->cmd.cmdId == AnimCmd_GetPalette) {
+        ACmd_GetPalette* cmd = &dtCmd->cmd._pal;
+
+        tileInfo->cachedPaletteId = cmd->palId;
+        tileInfo->cachedNumColors = cmd->numColors;
+        tileInfo->cachedInsertOffset = cmd->insertOffset;
+    }
+    if (dtCmd->cmd.cmdId == AnimCmd_GetTiles) {
+        ACmd_GetTiles* cmd = &dtCmd->cmd._tiles;
+
+        if (cmd->tileIndex < 0) {
+#if 0
+            fprintf(fileStream,
+                "--- 8BPP FOUND: %d\n"
+                "  Anim: %d, Vari: %d, Label: %d\n"
+                "   Pal:  %d, Num: %d, Insrt: %d\n",
+                cmd->tileIndex,
+                animId, variantId, labelId,
+                tileInfo->cachedPaletteId, tileInfo->cachedNumColors, tileInfo->cachedInsertOffset);
+#endif
+        }
+        else {
+#if 0
+            fprintf(fileStream,
+                "Pal:  %6d, Num: %4d, Insrt: %2d\n",
+                tileInfo->cachedPaletteId, tileInfo->cachedNumColors, tileInfo->cachedInsertOffset);
+#endif
+        }
+
+        TileInfo* tileInfo = (TileInfo*)itParams;
+        tileInfo->numTileIndices = Max(tileInfo->numTileIndices, (cmd->tileIndex + cmd->numTilesToCopy));
+        tileInfo->numGetTileCalls++;
+
+        TileRange tr;
+        tr.firstTileId = cmd->tileIndex;
+        tr.minRange    = cmd->numTilesToCopy;
+        tr.paletteId   = tileInfo->cachedPaletteId;
+        memArenaAddMemory(tileInfo->tileRanges, &tr, sizeof(tr));
+
+    }
+}
+
+int trCompare(const void* _a, const void* _b) {
+    TileRange* a = (TileRange*)_a;
+    TileRange* b = (TileRange*)_b;
+
+    long long aDiff = (long long)a->firstTileId | (long long)a->minRange;
+    long long bDiff = (long long)b->firstTileId | (long long)b->minRange;
+    return(a - b);
+}
+
+void generateScriptBinaryToPng(TileRange* tr, char* scriptPath, int firstFrame, int lastFrame) {
+    FILE* script_BinaryToPng = fopen(scriptPath, "a+");
+
+    // @NOTE(Jace): When using this script, make sure the files aren't restricted!
+    fprintf(script_BinaryToPng, "#!/bin/sh\n");
+    for (int frame = firstFrame; frame < lastFrame; frame++) {
+        int palId = 0;
+
+        // TODO: Replace this with the actual information provided by the SpriteTable
+        // Afterwards remove math.h from this and -lm from build.sh.
+        int frameWidth = 3;
+        int frameTileCount = tr[frame].minRange;
+        int widthSqrt = sqrtf((float)frameTileCount);
+        if (frameTileCount == (widthSqrt * widthSqrt))
+            frameWidth = widthSqrt;
+        else while ((frameWidth < frameTileCount) && (frameTileCount % frameWidth) != 0)
+            frameWidth++;
+
+        frameWidth = Min(frameTileCount, frameWidth);
+        fprintf(script_BinaryToPng,
+            "./gbagfx ../frames/frame_%04d.4bpp ../frames/frame_%04d.png -object -palette ../palettes/pal_%03d.gbapal -width %d\n",
+            frame, frame, tr[frame].paletteId, frameWidth);
+    }
+}
+
+// Behaviour similar to 'updateDirectory' but doesn't try to
+// create a directory from the file path.
+char* addToPath(MemArena* arena, char* path, char* name) {
+    char* out = memArenaReserve(arena, strlen(path) + strlen("/") + strlen(name) + 1);
+    sprintf(out, "%s/%s", path, name);
+    return out;
+}
+
+char* updateDirectory(MemArena* arena, char* currentPath, char* newFolder) {
+    char* out = NULL;
+
+    if (newFolder == NULL) {
+        out = memArenaAddString(arena, currentPath);
+    } else {
+        out = addToPath(arena, currentPath, newFolder);
+    }
+    mkdir(out);
+
+    return out;
+}
+
+char* gameFolderName(u8* rom) {
+    eGame index = getRomIndex(rom);
+
+    switch (index) {
+    case SA1: {
+        return "sa1";
+    }
+    case SA2: {
+        return "sa2";
+    }
+    case SA3: {
+        return "sa3";
+    }
+    case KATAM: {
+        return "katam";
+    }
+    default:
+        return "";
+    }
+}
+
+void tryLoadingRom(char* path, u8** rom, eGame *romIndex) {
+    FILE* romFile = fopen(path, "rb");
+    int fileSize = 0;
+
+    if (romFile == NULL) {
+        fprintf(stderr, "Could not open file '%s'. Code: %d\n", path, errno);
+        exit(-2);
+    }
+
+    fileSize = getFileSize(romFile);
+    *rom = (u8*)malloc(fileSize);
+
+    fseek(romFile, 0, SEEK_SET);
+    if (fread(*rom, 1, fileSize, romFile) != fileSize) {
+        fprintf(stderr, "File '%s' couldn't be fully loaded.\n", path);
+        exit(-3);
+    }
+
+    // We have a copy of the ROM in memory
+    // and don't intend to write to it again, so close the file.
+    fclose(romFile);
+
+
+    *romIndex = getRomIndex(*rom);
+    if (*romIndex == UNKNOWN) {
+        fprintf(stderr, "Loaded ROM is unknown game. Closing...\n");
+        exit(-4);
+    }
+}
+
+void printHelp(char* programPath) {
+    fprintf(stderr,
+        "This program can be used to extract animation data from the Sonic Advance games.\n"
+        "Please add the path to a Sonic Advance 1|2|3 ROM file as a parameter.\n"
+        "%s <SA3 ROM>\n", programPath);
+}
+
+// Get the last occurence of sub in base
+char* lastString(char* base, char* sub) {
+    if (!base || !sub)
+        return NULL;
+
+    int baseLen = strlen(base);
+    int subLen  = strlen(sub);
+
+    if (baseLen < subLen)
+        return NULL;
+
+    char* last   = base + baseLen - subLen;
+    char* cursor = last;
+    while (cursor >= base) {
+        if (cursor = strstr(cursor, sub))
+            break;
+        else
+            cursor = --last;
+    }
+
+    // String was not found
+    if (cursor < base)
+        return NULL;
+    else
+        return cursor;
+}
+
+int main(int argCount, char** args) {
+    if((argCount < 2) || (argCount > 2)
+    || (!strcmp(args[1], "-h"))
+    || (!strcmp(args[1], "--help"))) {
+        printHelp(args[0]);
+        exit(-1);
+    }
+    
+    u8* rom = NULL;
+
+    eGame game;
+    tryLoadingRom(args[1], &rom, &game);
+
+
+    SpriteTables spriteTables;
+    getSpriteTables(rom, game, &spriteTables);
+
+    AnimationTable animTable = { 0 };
+    animTable.data = spriteTables.animations;
+    animTable.entryCount = g_TotalAnimationCount[game];
+
+    OutFiles files = { 0 };
+#if !PRINT_TO_STDOUT
+    // Create output directories
+    MemArena paths;
+    memArenaInit(&paths);
+
+    // Directory paths
+    char* outPath       = updateDirectory(&paths, "out", NULL);
+    char* gameAssetPath = updateDirectory(&paths, outPath, gameFolderName(rom));
+    char* palettePath   = updateDirectory(&paths, gameAssetPath, "palettes");
+    char* framePath     = updateDirectory(&paths, gameAssetPath, "frames");
+    char* docsPath      = updateDirectory(&paths, gameAssetPath, "documents");
+
+    // File paths
+    char* headerFilePath          = addToPath(&paths, docsPath, "macros.inc");
+    char* animationTableFilePath  = addToPath(&paths, docsPath, "animation_table.inc");
+    char* genFramesScriptFilePath = addToPath(&paths, docsPath, "gen_frames.sh");
+    
+    files.header    = fopen(headerFilePath, "w");
+    files.animTable = fopen(animationTableFilePath, "w");
+#endif
+    if (!files.header)
+        files.header = stdout;
+
+    if (!files.animTable)
+        files.animTable = stdout;
+
+    MemArena mtableArena;
+    memArenaInit(&mtableArena);
+                    
+    MemArena stringOffsetArena;
+    memArenaInit(&stringOffsetArena);
+                    
+    MemArena stringArena;
+    memArenaInit(&stringArena);
+
+    DynTable dynTable = { 0 };
+    createDynamicAnimTable(&mtableArena, rom, &animTable, &dynTable);
+
+    // Generates the names for the animations themselves
+    LabelStrings labels = { 0 };
+    createAnimLabels(&dynTable, animTable.entryCount, &labels, &stringArena, &stringOffsetArena);
+
+#if 1
+    printAnimationDataFile(files.header, &dynTable, &labels, &stringArena, &stringOffsetArena, animTable.entryCount, &files);
+    printAnimationTable(files.animTable, &dynTable, &animTable, &labels);
+#endif
+    MemArena tileRanges;
+    memArenaInit(&tileRanges);
+
+    TileInfo tileInfo = { 0 };
+    tileInfo.tileRanges = &tileRanges;
+
+    iterateAllCommands(stdout, &dynTable, 0, animTable.entryCount, itGetNumTileInformation, &tileInfo);
+    //printf("Calls: %d\nTile Indices: %d\n", tileInfo.numGetTileCalls, tileInfo.numTileIndices);
+
+
+    // Sort all calls by the tile index
+    TileRange* tr = (TileRange*)tileRanges.memory;
+    qsort(tr, tileInfo.numGetTileCalls, sizeof(TileRange), trCompare);
+
+    // Count and only keep the unique calls
+    int uniqueCallCount = 1;
+    for (int i = 1; i < tileInfo.numGetTileCalls; i++) {
+        TileRange* a = &tr[i - 1];
+        TileRange* b = &tr[i];
+
+        if (a->firstTileId - b->firstTileId) {
+            tr[uniqueCallCount++] = *b;
+        }
+                        
+    }
+    //printf("COUNT: %d\n", uniqueCallCount);
+
+    /* Now we have all tile-ranges in the game, in order. */
+
+    char *filePath = addToPath(&paths, framePath, "frame_XXXX.4bpp");
+    char* fileString = lastString(filePath, "frame_");
+    u16 paletteBuffer[16*16] = { 0 };
+#define OUTPUT_FRAMES 0
+#if OUTPUT_FRAMES
+    // Output every frame as its own file.
+    for (int i = 0; i < uniqueCallCount; i++) {
+        TileRange* a = &tr[i];
+
+        u8* spriteFrame = spriteTables.tiles_4bpp + a->firstTileId * TILE_SIZE_4BPP;
+
+
+        sprintf(fileString, "frame_%04d.4bpp", i);
+        FILE* frameFile = fopen(filePath, "wb");
+        fwrite(spriteFrame, TILE_SIZE_4BPP, a->minRange, frameFile);
+        fclose(frameFile);
+    }
+#endif
+
+#define OUTPUT_PALETTES 1
+#if OUTPUT_PALETTES
+    int colorsPerPalette = 16;
+    int paletteCount = ((spriteTables.tiles_4bpp - (u8*)spriteTables.palettes) / (2*colorsPerPalette));
+
+    char* fileName = addToPath(&paths, palettePath, "pal_XXXXXX.gbapal");
+    fileName = lastString(fileName, "pal_");
+    // Output every palette as its own file.
+    for (int i = 0; i < paletteCount; i++) {
+
+        u16* pal = spriteTables.palettes + colorsPerPalette * i;
+
+        memcpy(&paletteBuffer, pal, 2 * 16);
+
+        sprintf(fileName, "pal_%03d.gbapal", i);
+        FILE* palFile = fopen(palettePath, "wb");
+        fwrite(paletteBuffer, 2, 16, palFile);
+        fclose(palFile);
+    }
+#endif
+
+    int firstFrame = 0;
+    int lastFrame = uniqueCallCount;// Min(firstFrame + 5, uniqueCallCount);
+    generateScriptBinaryToPng(tr, genFramesScriptFilePath, firstFrame, lastFrame);
+
+
+    if(files.animTable && files.animTable != stdout)
+        fclose(files.animTable);
+
+    if (files.header && files.header != stdout)
+        fclose(files.header);
+
+    return 0;
 }

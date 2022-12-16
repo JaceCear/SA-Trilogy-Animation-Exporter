@@ -1,10 +1,14 @@
 #ifndef GUARD_ANIM_EXPORTER_H
 #define GUARD_ANIM_EXPORTER_H
 
-#define GAME_SA1            1
-#define GAME_SA2            2
-#define GAME_SA3            3
-#define GAME_KATAM          10 // Kirby & the Amazing Mirror
+typedef enum {
+    UNKNOWN = 0,
+    SA1     = 1,
+    SA2     = 2,
+    SA3     = 3,
+
+    KATAM   = 10, // Kirby & the Amazing Mirror
+} eGame;
 
 typedef struct {
     RomPointer* data;
@@ -46,5 +50,22 @@ typedef struct {
     u32 count;
 } LabelStrings;
 
+typedef struct {
+    /* 0x00 void* */ RomPointer animations;
+    /* 0x04 void* */ RomPointer dimensions;
+    /* 0x08 u16** */ RomPointer oamData;
+    /* 0x0C u16*  */ RomPointer palettes;
+    /* 0x10 void* */ RomPointer tiles_4bpp;
+    /* 0x14 void* */ RomPointer tiles_8bpp;
+} SpriteTablesROM;
+
+typedef struct {
+    /* 0x00 */ void* animations;
+    /* 0x04 */ void* dimensions;
+    /* 0x08 */ u16** oamData;
+    /* 0x0C */ u16*  palettes;
+    /* 0x10 */ u8*   tiles_4bpp;
+    /* 0x14 */ u8*   tiles_8bpp;
+} SpriteTables;
 
 #endif // GUARD_ANIM_EXPORTER_H

@@ -22,5 +22,5 @@ or build it manually with
 `gcc -O2 animExporter.c ArenaAlloc.c -o animExporter`
 
 # Troubleshooting
-If your region's ROM does not work, check `getAnimTableAddress` inside `animExporter.c` to set a different address.
+If your region's ROM does not work, check `getSpriteTables` inside `animExporter.c` to set a different address.
 Feel free to add a pull request with a patch case you find a new offset.

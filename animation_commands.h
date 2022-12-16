@@ -6,9 +6,20 @@
 typedef u16 AnimId;
 
 typedef struct {
-    /* 0x00 */ s32 cmdId; // -1
+    s32 unk0;
+    u8 unk4;
+    u8 unk5;
+    u8 unk6;
+    u8 unk7;
+} Sprite_UNK28;
 
-    /* 0x04 */ u32 tileIndex;
+typedef struct {
+    /* 0x00 */ s32 cmdId; // -2
+
+    // Note(Jace): This needs to be signed, since a
+    //             negative value infers that it's using 8bit-colors
+    /* 0x04 */ s32 tileIndex;
+
     /* 0x08 */ u32 numTilesToCopy;
 } ACmd_GetTiles;
 
@@ -52,8 +63,7 @@ typedef struct {
 typedef struct {
     /* 0x00 */ s32 cmdId; // -6
 
-    /* 0x04 */ s32 unk4;
-    /* 0x08 */ s32 unk8;
+    /* 0x04 */ Sprite_UNK28 unk4;
 } ACmd_6;
 
 typedef struct {

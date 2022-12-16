@@ -30,6 +30,10 @@ typedef u32 StringId;
 
 #define DEBUG 1
 
+#ifndef TILE_SIZE_4BPP
+#define TILE_SIZE_4BPP 0x20
+#endif
+
 #ifdef DEBUG
 #define assert(cond)                                                    \
 if (!(cond)) {                                                                    \
