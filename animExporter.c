@@ -987,7 +987,7 @@ int trCompare(const void* _a, const void* _b) {
 }
 
 void generateScriptBinaryToPng(TileRange* tr, char* scriptPath, int firstFrame, int lastFrame) {
-    FILE* script_BinaryToPng = fopen(scriptPath, "a+");
+    FILE* script_BinaryToPng = fopen(scriptPath, "w");
 
     // @NOTE(Jace): When using this script, make sure the files aren't restricted!
     fprintf(script_BinaryToPng, "#!/bin/sh\n");
