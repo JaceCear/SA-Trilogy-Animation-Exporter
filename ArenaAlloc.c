@@ -28,7 +28,7 @@ void
 memArenaFree(MemArena *arena) {
     free(arena->memory);
 
-    memset(arena, 0, sizeof(MemArena));
+    //memset(arena, 0, sizeof(MemArena));
 }
 
 // Reserve 'byteCount' amount of memory and set it to zero.

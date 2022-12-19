@@ -126,7 +126,7 @@ typedef struct {
 
 // Only for use with exporter, not in-game!
 typedef union {
-    s32 cmdId;
+    s32 id;
 
     ACmd_GetTiles _tiles;
     ACmd_GetPalette _pal;

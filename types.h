@@ -4,7 +4,7 @@
 #define FALSE 0
 #define TRUE  1
 
-typedef signed int bool;
+typedef signed char bool;
 
 typedef signed char         s8;
 typedef signed short       s16;
@@ -30,8 +30,20 @@ typedef u32 StringId;
 
 #define DEBUG 1
 
+#define TILE_WIDTH 8
+
 #ifndef TILE_SIZE_4BPP
 #define TILE_SIZE_4BPP 0x20
+#endif
+
+#ifndef TILE_SIZE_8BPP
+#define TILE_SIZE_8BPP 0x40
+#endif
+
+#ifdef _MSC_VER
+#define PACKED #pragma pack(push,1)
+#else
+#define PACKED __attribute__((packed))
 #endif
 
 #ifdef DEBUG
