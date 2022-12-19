@@ -1302,8 +1302,11 @@ void generateSprite(u8* rom, SpriteTables* spriteTables, FrameDataInput* fdi, FI
 
             // Assembly file, putting all tiles together
             fprintf(inc_bin,
+#define ADD_GLOBAL_LABELS_TO_INCBIN FALSE // Can be useful for debugging!
+#if ADD_GLOBAL_LABELS_TO_INCBIN
                 ".global %s\n"
                 "%s:\n"
+#endif // ADD_GLOBAL_LABELS_TO_INCBIN
                 "\t.incbin \"%s/%s.4bpp\"\n",
                 filenameNoExt, filenameNoExt,
                 "graphics/frames", filenameNoExt);
