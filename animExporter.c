@@ -361,7 +361,7 @@ printCommand(FILE* fileStream, DynTableAnimCmd* inAnimCmd, LabelStrings* labels)
     } break;
 
     case AnimCmd_11: {
-        ACmd_11* cmd = &inCmd->_11;
+        ACmd_SetSpritePriority* cmd = &inCmd->_11;
         fprintf(fileStream, "0x%x", cmd->unk4);
     } break;
 
@@ -718,7 +718,7 @@ fillVariantFromRom(MemArena* arena, u8* rom, const RomPointer* variantInRom) {
                 
             case AnimCmd_11:
                 currCmd->cmd._11.unk4 = cmdInRom->_11.unk4;
-                structSize = sizeof(ACmd_11);
+                structSize = sizeof(ACmd_SetSpritePriority);
                 break;
                 
             case AnimCmd_12:
@@ -1308,7 +1308,6 @@ void generateSprite(u8* rom, SpriteTables* spriteTables, FrameDataInput* fdi, FI
                 "%s:\n"
 #endif // ADD_GLOBAL_LABELS_TO_INCBIN
                 "\t.incbin \"%s/%s.4bpp\"\n",
-                filenameNoExt, filenameNoExt,
                 "graphics/frames", filenameNoExt);
         }
     }
