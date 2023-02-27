@@ -4,8 +4,17 @@
 
 
 #ifdef __unix__
-#include <sys/mman.h>
 #include <errno.h>
+
+#define _GNU_SOURCE 1
+#include <unistd.h>
+#include <sys/mman.h>
+
+// This should be defined in sys/mman.h - why isn't it?
+#define MREMAP_MAYMOVE   1
+#define MREMAP_FIXED     2
+#define MREMAP_DONTUNMAP 4
+void *mremap(void *old_address, size_t old_size, size_t new_size, int flags, void*);
 #else
 #ifdef _MSC_VER
 #include <Windows.h>
@@ -20,13 +29,54 @@
 
 static void memArenaExpand(MemArena *arena, s32 numNewArenas);
 
-static void* memArenaAllocVirtual(void* baseAddress, size_t size) {
+// I have no idea why this is necessary.
+// VirtualAlloc's 2nd parameter accepts a SIZE_T, but
+// if you directly pass a value that is 2GB or more (0x80000000),
+// you'll be left with a downcast signed 32 bit value, even in 64bit mode
+//   Behaviour in:  VS Compiler v14.34.31937.0
+u64 GetGigabytes(u64 num) {
+    return num*1024*1024*1024;
+}
+
+static void *memArenaVirtualAlloc(void* baseAddress, size_t size) {
     assert(size > 0);
 
+    void* memory = NULL;
+    
+    // TODO/TEMP: Just reserve 4GB for each arena
+    u64 memoryAmount = GetGigabytes(4);
+
+    // Call OS-specific memory alloc function
 #ifdef __unix__
-    void* memory = mmap(baseAddress, size, (PROT_READ | PROT_WRITE), (MAP_PRIVATE | MAP_ANONYMOUS), -1, 0);
+    memory = mmap(baseAddress, size, (PROT_READ | PROT_WRITE), (MAP_PRIVATE | MAP_ANONYMOUS), -1, 0);
     if(memory == MAP_FAILED) {
         printf("ERROR: Call to mmap failed! (Errno: %d)\n", errno);
+        return NULL;
+    }
+#else
+#ifdef _MSC_VER
+    memory = VirtualAlloc(baseAddress, memoryAmount, (MEM_COMMIT | MEM_RESERVE), PAGE_READWRITE);
+#endif
+#endif
+
+    return memory;
+}
+
+static void *memArenaVirtualRealloc(void* memory, size_t oldSize, size_t newSize) {
+    assert(newSize > 0);
+
+    void *oldAddress = memory;
+
+#if 1
+    // TODO: If there's a way to allocate more memory while keeping the base address,
+    //       do it on all platforms instead of just allocating 4GB in the beginning.
+    void *newAddress = oldAddress;
+#else
+    printf("OldMem: %p - PageSize: 0x%X\n", oldAddress, (u32)oldSize);
+#ifdef __unix__
+    newAddress = mremap(oldAddress, oldSize, oldSize/2, 0, NULL);
+    if((newAddress == MAP_FAILED)) {
+        printf("ERROR: Call to mremap failed! (Errno: %d)\n", errno);
         return NULL;
     }
 #else
@@ -34,38 +84,36 @@ static void* memArenaAllocVirtual(void* baseAddress, size_t size) {
 
 #endif
 #endif
-    // TEMP / DEBUG
-    printf("Mem: %p - PageSize: 0x%lX\n", memory, size);
-    *((u8*)memory + 0) = 'H';
-    *((u8*)memory + 1) = 'e';
-    *((u8*)memory + 2) = 'y';
-    *((u8*)memory + 3) = '!';
-    *((u8*)memory + 4) = '\n';
-    printf((char*)memory);
-    printf("Test\n");
+#endif
 
-    exit(-1);
+    // If the addresses are different, pointers would be wrong
+    assert(oldAddress == newAddress);
+
+    return newAddress;
+}
+
+static void memArenaVirtualFree(MemArena* arena) {
+#ifdef __unix__
+    munmap(arena->memory, arena->size);
+#else
+#ifdef _MSC_VER
+    VirtualFree(arena->memory, arena->size, MEM_RELEASE);
+#endif
+#endif
 }
 
 void
 memArenaInit(MemArena *arena) {
-    long long size = ARENA_SIZE;
-    size++; // @NOTE: what's this size++ here for?
-    int sizeofLong = sizeof(long long);
-    arena->memory = memArenaAllocVirtual(NULL, ARENA_SIZE);
-    
-    assert(arena->memory);
-    
+    arena->memory = memArenaVirtualAlloc(NULL, ARENA_SIZE);
     arena->size = ARENA_SIZE;
     arena->offset = 0;
-    
+
+    assert(arena->memory);
 }
 
 void
 memArenaFree(MemArena *arena) {
-    munmap(arena->memory, arena->size);
-
-    //memset(arena, 0, sizeof(MemArena));
+    memArenaVirtualFree(arena);
 }
 
 // Reserve 'byteCount' amount of memory and set it to zero.
@@ -195,10 +243,7 @@ memArenaExpand(MemArena *arena, s32 numNewArenas) {
     
     // @BUG @SPEED
     // malloc only takes an int, use VirtualAlloc() instead...
-    arena->memory = realloc(arena->memory, newSize);
-    if(arena->memory) {
-        arena->size = newSize;
-    } else {
-        arena->size = 0;
-    }
+    arena->memory = memArenaVirtualRealloc(arena->memory, arena->size, newSize);
+    assert(arena->memory);
+    arena->size = newSize;
 }
