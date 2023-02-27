@@ -1,7 +1,17 @@
-#include <malloc.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+
+#ifdef __unix__
+#include <sys/mman.h>
+#include <errno.h>
+#else
+#ifdef _MSC_VER
+#include <Windows.h>
+#endif
+#endif
+#include <malloc.h> // TODO: Remove
 
 #include "types.h"
 #include "ArenaAlloc.h"
@@ -10,12 +20,39 @@
 
 static void memArenaExpand(MemArena *arena, s32 numNewArenas);
 
+static void* memArenaAllocVirtual(void* baseAddress, size_t size) {
+    assert(size > 0);
+
+#ifdef __unix__
+    void* memory = mmap(baseAddress, size, (PROT_READ | PROT_WRITE), (MAP_PRIVATE | MAP_ANONYMOUS), -1, 0);
+    if(memory == MAP_FAILED) {
+        printf("ERROR: Call to mmap failed! (Errno: %d)\n", errno);
+        return NULL;
+    }
+#else
+#ifdef _MSC_VER
+
+#endif
+#endif
+    // TEMP / DEBUG
+    printf("Mem: %p - PageSize: 0x%lX\n", memory, size);
+    *((u8*)memory + 0) = 'H';
+    *((u8*)memory + 1) = 'e';
+    *((u8*)memory + 2) = 'y';
+    *((u8*)memory + 3) = '!';
+    *((u8*)memory + 4) = '\n';
+    printf((char*)memory);
+    printf("Test\n");
+
+    exit(-1);
+}
+
 void
 memArenaInit(MemArena *arena) {
     long long size = ARENA_SIZE;
     size++; // @NOTE: what's this size++ here for?
     int sizeofLong = sizeof(long long);
-    arena->memory = calloc(1, size);
+    arena->memory = memArenaAllocVirtual(NULL, ARENA_SIZE);
     
     assert(arena->memory);
     
@@ -26,7 +63,7 @@ memArenaInit(MemArena *arena) {
 
 void
 memArenaFree(MemArena *arena) {
-    free(arena->memory);
+    munmap(arena->memory, arena->size);
 
     //memset(arena, 0, sizeof(MemArena));
 }
