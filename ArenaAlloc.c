@@ -93,6 +93,7 @@ static void *memArenaVirtualRealloc(void* memory, size_t oldSize, size_t newSize
 }
 
 static void memArenaVirtualFree(MemArena* arena) {
+    if(arena->memory) {
 #ifdef __unix__
     munmap(arena->memory, arena->size);
 #else
@@ -100,11 +101,13 @@ static void memArenaVirtualFree(MemArena* arena) {
     VirtualFree(arena->memory, arena->size, MEM_RELEASE);
 #endif
 #endif
+    }
 }
 
 void
 memArenaInit(MemArena *arena) {
-    arena->memory = memArenaVirtualAlloc(NULL, ARENA_SIZE);
+    void* newMem = memArenaVirtualAlloc(NULL, ARENA_SIZE); 
+    arena->memory = newMem;
     arena->size = ARENA_SIZE;
     arena->offset = 0;
 

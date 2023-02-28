@@ -59,6 +59,24 @@ typedef struct {
     /* 0x14 void* */ RomPointer tiles_8bpp;
 } SpriteTablesROM;
 
+typedef struct {
+    bool wasInitialized;
+    u16 tileCount;
+    s32 tileIndex;
+
+    s32 paletteId;
+    u16 numColors;
+
+    u16 animId;
+    u16 variantId;
+    u16 labelId;
+} FrameData;
+
+typedef struct {
+    FrameData* data;
+    u16 frameCount;
+} FrameDataInput;
+
 typedef struct  {
     /*0x00*/ u32 y : 8;
     /*0x01*/ u32 affineMode : 2;  // 0x1, 0x2 -> 0x4

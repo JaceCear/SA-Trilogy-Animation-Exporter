@@ -1070,24 +1070,6 @@ void printHelp(char* programPath) {
         "%s <SA3 ROM>\n", programPath);
 }
 
-typedef struct {
-    bool wasInitialized;
-    u16 tileCount;
-    s32 tileIndex;
-
-    s32 paletteId;
-    u16 numColors;
-
-    u16 animId;
-    u16 variantId;
-    u16 labelId;
-} FrameData;
-
-typedef struct {
-    FrameData* data;
-    u16 frameCount;
-} FrameDataInput;
-
 // The "Display" command occurs after the tile/palette data is set,
 // so we store the information in the buffer, until the command occurs.
 static FrameData fdBuffer = { 0 };
@@ -1197,7 +1179,7 @@ typedef enum {
 typedef struct {
     s8 x, y;
 } s8Vec2D;
-const s8Vec2D oamTileSizes[3][4] = {
+const s8Vec2D sOamTileSizes[3][4] = {
     { {1,1}, {2,2}, {4,4}, {8,8} }, // Square
     { {2,1}, {4,1}, {4,2}, {8,4} }, // Horizontal
     { {1,2}, {1,4}, {2,4}, {4,8} }, // Vertical
@@ -1211,7 +1193,7 @@ typedef struct {
 static WrittenTiles writtenTiles;
 
 // Check whether the addressed tiles were already exported.
-bool wasWritten(u16 animId, u8* targetTiles) {
+bool wasFrameIndexed(u16 animId, u8* targetTiles) {
     if (animId != writtenTiles.lastAnim) {
         writtenTiles.writtenCount = 0;
         writtenTiles.lastAnim = animId;
@@ -1226,21 +1208,141 @@ bool wasWritten(u16 animId, u8* targetTiles) {
             break;
         }
     }
-    pointers[writtenTiles.writtenCount] = targetTiles;
-    writtenTiles.writtenCount++;
 
     return result;
 }
 
-void generateSprite(u8* rom, SpriteTables* spriteTables, FrameDataInput* fdi, FILE* scriptFilestream, FILE* tile_collection, FILE* inc_bin, u16 animId, char* framePath, char* docsPath, char* palPath) {
+void indexFrame(void* frameTiles){
+    u8** pointers = writtenTiles.arena.memory;
+
+    pointers[writtenTiles.writtenCount] = frameTiles;
+    writtenTiles.writtenCount++;
+}
+
+
+#if 001
+void generateSprite(u8* rom, MemArena* fullTileImage, SpriteTables* spriteTables, FrameDataInput* fdi, FILE* scriptFilestream, FILE* tile_collection, FILE* inc_bin, u16 animId, char* framePath, char* docsPath, char* palPath) {
     FrameData* fds = fdi->data;
 
-    SpriteOffset* dimsBase = romToVirtual(rom, spriteTables->dimensions[animId]);
-    u16* oamDataBase       = romToVirtual(rom, spriteTables->oamData[animId]);
+    SpriteOffset* dimensions = romToVirtual(rom, spriteTables->dimensions[animId]);
+    u16* oamDataStart      = romToVirtual(rom, spriteTables->oamData[animId]);
 
     // Write script header
 
-    if (dimsBase == NULL || oamDataBase == NULL)
+    if (dimensions == NULL || oamDataStart == NULL)
+        return;
+
+    char filePath[256];
+    char filenameNoExt[64];
+    
+    for (int frameId = 0; frameId < fdi->frameCount; frameId++) {
+        // Reset the frame buffer, to reduce memory usage
+        fullTileImage->offset = 0;
+
+        FrameData *fd = &fds[frameId];
+        SpriteOffset* frameDimensions = &dimensions[frameId];
+        assert((frameDimensions->width % 8) == 0);
+        assert((frameDimensions->height % 8) == 0);
+
+        u16* palette = &spriteTables->palettes[fd->paletteId * 16];
+
+        // Pointer to OamData of the whole frame
+        OamSplit* frameOamData = (OamSplit*)(&oamDataStart[frameDimensions->oamIndex*3]);
+
+        int tileSize = (fd->tileIndex & 0x80000000)
+            ? TILE_SIZE_8BPP
+            : TILE_SIZE_4BPP;
+
+        // 'tiles' point to the root of this frame's tiles
+        u8* tiles = (fd->tileIndex & 0x80000000)
+            ? &spriteTables->tiles_8bpp[fd->tileIndex * tileSize]
+            : &spriteTables->tiles_4bpp[fd->tileIndex * tileSize];
+
+        u8  tilePitch      = (tileSize / TILE_WIDTH);
+        u16 tileImagePitch = (frameDimensions->width / TILE_WIDTH) * tileSize;
+        
+        sprintf(filenameNoExt, "a%04d_f%03d", animId, frameId);
+        sprintf(filePath, "%s/%s.4bpp", framePath, filenameNoExt);
+        FILE* frameFile = fopen(filePath, "wb");
+        
+        u8* image = memArenaReserve(fullTileImage, (frameDimensions->width*frameDimensions->height)*tileSize);
+
+        long fullFrameSize = 0;
+        for (int subFrame = 0; subFrame < frameDimensions->numSubframes; subFrame++) {
+            // MSVC doesn't support the regular "packed" attribute of GCC.
+            // We have to work around that with this cast...
+            // Pointer to OamData of each sub-frame
+            OamSplit* oamSubFrame = (OamSplit*)&((u16*)frameOamData)[subFrame * 3];
+
+            // TODO: Add check for exporting the same data multiple times.
+
+            s8Vec2D sizes = sOamTileSizes[oamSubFrame->shape][oamSubFrame->size];
+            int numTiles = sizes.x * sizes.y;
+
+            s8Vec2D subPos = {oamSubFrame->x, oamSubFrame->y};
+
+            u8* subFrameTiles  = &tiles[oamSubFrame->tileNum * tileSize];
+            
+            for(int y = 0;
+                y < sizes.y;
+                y++)
+            {
+                int dstIndex = (subPos.y/TILE_WIDTH + y)*tileImagePitch + subPos.x*tilePitch;
+                int srcIndex = (y*sizes.x)*tileSize;
+                int subFrameRowSize = sizes.x * tileSize;
+
+                //memcpy_s(&image[dstIndex], fullTileImage->size, &subFrameTiles[srcIndex], sizes.x*tileSize);
+                memcpy(&image[dstIndex], &subFrameTiles[srcIndex], sizes.x*tileSize);
+                fullFrameSize += subFrameRowSize;
+            }
+        }
+        
+        if (!wasFrameIndexed(animId, tiles) && frameFile) {
+            indexFrame(tiles);
+            
+            fwrite(image, fullFrameSize, 1, frameFile);
+            fclose(frameFile);
+        }
+
+        {
+            // Output 4BPP frame data
+#if 1
+            // Write gbagfx command for conversion script
+            fprintf(scriptFilestream, "./gbagfx %s/%s.4bpp %s/%s.png -object -palette %s/pal_%03d.gbapal -width %d\n",
+                framePath, filenameNoExt,
+                framePath, filenameNoExt,
+                palPath, fd->paletteId,
+                frameDimensions->width / TILE_WIDTH);
+
+            // PNG -> 4BPP script
+            fprintf(tile_collection, "./tools/gbagfx/gbagfx %s/%s.png %s/%s.4bpp -width %d\n",
+                framePath, filenameNoExt,
+                framePath, filenameNoExt,
+                frameDimensions->width / TILE_WIDTH);
+            
+#endif
+            // Assembly file, putting all tiles together
+            fprintf(inc_bin,
+#define ADD_GLOBAL_LABELS_TO_INCBIN FALSE // Can be useful for debugging!
+#if ADD_GLOBAL_LABELS_TO_INCBIN
+                ".global %s\n"
+                "%s:\n"
+#endif // ADD_GLOBAL_LABELS_TO_INCBIN
+                "\t.incbin \"%s/%s.4bpp\"\n",
+                "graphics/frames", filenameNoExt);
+        }
+    }
+}
+#else
+void generateSprite(u8* rom, SpriteTables* spriteTables, FrameDataInput* fdi, FILE* scriptFilestream, FILE* tile_collection, FILE* inc_bin, u16 animId, char* framePath, char* docsPath, char* palPath) {
+    FrameData* fds = fdi->data;
+
+    SpriteOffset* dimensions = romToVirtual(rom, spriteTables->dimensions[animId]);
+    u16* oamDataStart       = romToVirtual(rom, spriteTables->oamData[animId]);
+
+    // Write script header
+
+    if (dimensions == NULL || oamDataStart == NULL)
         return;
 
     char filePath[256];
@@ -1259,9 +1361,9 @@ void generateSprite(u8* rom, SpriteTables* spriteTables, FrameDataInput* fdi, FI
 
         u16* palette = &spriteTables->palettes[fd->paletteId * 16];
 
-        SpriteOffset* dimensions = &dimsBase[frameId];
+        SpriteOffset* dimensions = &dimensions[frameId];
         // Pointer to OamData of the whole frame
-        OamSplit* frameOamData = (OamSplit*)(&oamDataBase[dimensions->oamIndex*3]);
+        OamSplit* frameOamData = (OamSplit*)(&oamDataStart[dimensions->oamIndex*3]);
 
         for (int subFrame = 0; subFrame < dimensions->numSubframes; subFrame++) {
             // MSVC doesn't support the regular "packed" attribute of GCC.
@@ -1271,7 +1373,7 @@ void generateSprite(u8* rom, SpriteTables* spriteTables, FrameDataInput* fdi, FI
 
             // TODO: Add check for exporting the same data multiple times.
 
-            s8Vec2D sizes = oamTileSizes[subFOamData->shape][subFOamData->size];
+            s8Vec2D sizes = sOamTileSizes[subFOamData->shape][subFOamData->size];
             int numTiles = sizes.x * sizes.y;
 
             // Output 4BPP frame data
@@ -1279,7 +1381,7 @@ void generateSprite(u8* rom, SpriteTables* spriteTables, FrameDataInput* fdi, FI
             sprintf(filePath, "%s/%s.4bpp", framePath, filenameNoExt);
 #if 1
             u8* targetTiles = tiles + tileSize * subFOamData->tileNum;
-            if (!wasWritten(animId, targetTiles)) {
+            if (!wasFrameIndexed(animId, targetTiles)) {
                 FILE* frame = fopen(filePath, "wb");
                 fwrite(targetTiles, tileSize, numTiles, frame);
                 fclose(frame);
@@ -1312,7 +1414,7 @@ void generateSprite(u8* rom, SpriteTables* spriteTables, FrameDataInput* fdi, FI
         }
     }
 }
-
+#endif
 void
 generateSprites(u8* rom, DynTable* dynTable, SpriteTables* spriteTables, int animMin, int animMax,
     char* framePath, char* docsPath, char* palettePath, char* genFramesScriptFilePath, char* gfxIncFilePath) {
@@ -1333,6 +1435,12 @@ generateSprites(u8* rom, DynTable* dynTable, SpriteTables* spriteTables, int ani
 
     FILE* script = fopen(genFramesScriptFilePath, "w");
     fprintf(script, "#!/bin/sh\n");
+
+    
+    // Scratch-memory for one full frame that should be output.
+    MemArena fullTileImage;
+    memArenaInit(&fullTileImage);
+
     for (int animId = animMin; animId < animMax; animId++) {
         if (spriteTables->animations == 0)
             continue;
@@ -1344,9 +1452,12 @@ generateSprites(u8* rom, DynTable* dynTable, SpriteTables* spriteTables, int ani
             fdi.data = memArenaReserve(&frameData, fdi.frameCount * sizeof(FrameData));
             iterateAllCommands(stdout, dynTable, animId, animId + 1, generateFrameData, &fdi);
 
-            generateSprite(rom, spriteTables, &fdi, script, tile_collection, incbin, animId, framePath, docsPath, palettePath);
+            generateSprite(rom, &fullTileImage, spriteTables, &fdi, script, tile_collection, incbin, animId, framePath, docsPath, palettePath);
         }
     }
+
+    memArenaFree(&fullTileImage);
+
     fclose(script);
     fclose(tile_collection);
     fclose(spriteImagesScript);
