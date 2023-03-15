@@ -25,7 +25,7 @@ void *mremap(void *old_address, size_t old_size, size_t new_size, int flags, voi
 #include "types.h"
 #include "ArenaAlloc.h"
 
-#define ARENA_SIZE (2*1024*1024)
+#define ARENA_SIZE (2*1024*1024*1024)
 
 static void memArenaExpand(MemArena *arena, s32 numNewArenas);
 
