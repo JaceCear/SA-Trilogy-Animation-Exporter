@@ -6,12 +6,12 @@
 typedef u16 AnimId;
 
 typedef struct {
-    s32 unk0;
-    u8 unk4;
-    u8 unk5;
-    u8 unk6;
-    u8 unk7;
-} Sprite_UNK28;
+    s32 index;
+    s8 left;
+    s8 top;
+    s8 right;
+    s8 bottom;
+} Hitbox;
 
 typedef struct {
     /* 0x00 */ s32 cmdId; // -2
@@ -51,7 +51,7 @@ typedef struct {
 
 typedef struct {
     /* 0x00 */ s32 cmdId; // -4
-} ACmd_4;
+} ACmd_End;
 
 typedef struct {
     /* 0x00 */ s32 cmdId; // -5
@@ -63,8 +63,8 @@ typedef struct {
 typedef struct {
     /* 0x00 */ s32 cmdId; // -6
 
-    /* 0x04 */ Sprite_UNK28 unk4;
-} ACmd_6;
+    /* 0x04 */ Hitbox hitbox;
+} ACmd_AddHitbox;
 
 typedef struct {
     /* 0x00 */ s32 cmdId; // -7
@@ -98,7 +98,7 @@ typedef struct {
 typedef struct {
     /* 0x00 */ s32 cmdId; // -11
 
-    /* 0x04 */ s32 unk4; // the logic of animCmd_11 suggests that only values of 0-3 make
+    /* 0x04 */ s32 unk4; // the logic of animCmd_11 suggests that only values of 0-3 makes
                          // sense here.
 } ACmd_SetSpritePriority;
 
@@ -131,14 +131,14 @@ typedef union {
     ACmd_GetTiles _tiles;
     ACmd_GetPalette _pal;
     ACmd_JumpBack _jump;
-    ACmd_4 _end;
+    ACmd_End _end;
     ACmd_PlaySoundEffect _sfx;
-    ACmd_6 _6;
+    ACmd_AddHitbox _hitbox;
     ACmd_TranslateSprite _translate;
     ACmd_8 _8;
     ACmd_SetIdAndVariant _animId;
     ACmd_10 _10;
-    ACmd_SetSpritePriority _11;
+    ACmd_SetSpritePriority _prio;
     ACmd_12 _12;
 
     // Not a regular "AnimCmd"
