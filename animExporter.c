@@ -48,14 +48,14 @@ const u32 g_TotalAnimationCount[] = {
 #define AnimCmd_GetTiles        -1
 #define AnimCmd_GetPalette      -2
 #define AnimCmd_JumpBack        -3
-#define AnimCmd_4               -4
+#define AnimCmd_End             -4
 #define AnimCmd_PlaySoundEffect -5
-#define AnimCmd_6               -6
+#define AnimCmd_AddHitbox       -6
 #define AnimCmd_TranslateSprite -7
 #define AnimCmd_8               -8
 #define AnimCmd_SetIdAndVariant -9
 #define AnimCmd_10              -10
-#define AnimCmd_11              -11
+#define AnimCmd_SetSpritePriority              -11
 #define AnimCmd_12              -12
 #define AnimCmd_DisplayFrame    (AnimCmd_12-1)
 
@@ -65,12 +65,12 @@ const char* animCommands[] = {
     "AnimCmd_JumpBack",
     "AnimCmd_End",
     "AnimCmd_PlaySoundEffect",
-    "AnimCmd_6",
+    "AnimCmd_AddHitbox",
     "AnimCmd_TranslateSprite",
     "AnimCmd_8",
     "AnimCmd_SetIdAndVariant",
     "AnimCmd_10",
-    "AnimCmd_11",
+    "AnimCmd_SetSpritePriority",
     "AnimCmd_12",
 
     // NOTE(Jace): This is NOT a "real" command, but a
@@ -86,12 +86,12 @@ const char* macroNames[SizeofArray(animCommands)] = {
     "mJumpBack",
     "mEnd",
     "mPlaySoundEffect",
-    "mAnimCmd6",
+    "mAddHitbox",
     "mTranslateSprite",
     "mAnimCmd8",
     "mSetIdAndVariant",
     "mAnimCmd10",
-    "mAnimCmd11",
+    "mAnimCmdSetSpritePriority",
     "mAnimCmd12",
 
     "mDisplayFrame"
@@ -100,6 +100,7 @@ const char* macroNames[SizeofArray(animCommands)] = {
 // %s placeholders:
 // 1) Macro name      (e.g. 'mGetTiles')
 // 2) Cmd identifier  (e.g. 'AnimCmd_GetTiles')
+// 3) Array-Base      (e.g. 'gObjPalettes_4bpp')
 const char* macros[SizeofArray(animCommands)] = {
     [~(AnimCmd_GetTiles)] =
         ".macro %s tile_index:req, num_tiles_to_copy:req\n"
@@ -109,20 +110,20 @@ const char* macros[SizeofArray(animCommands)] = {
         ".endm\n",
 
     [~(AnimCmd_GetPalette)] =
-        ".macro %s pal_id:req, num_colors_to_copy:req, insert_offset:req\n"
+        ".macro %s pal_ptr:req, num_colors_to_copy:req, insert_offset:req\n"
         ".4byte %s\n"
-        "  .4byte \\pal_id\n"
+        "  .4byte (\\pal_ptr - %s) / 0x20\n"
         "  .2byte \\num_colors_to_copy\n"
         "  .2byte \\insert_offset\n"
         ".endm\n",
 
     [~(AnimCmd_JumpBack)] =
-        ".macro %s offset:req\n"
+        ".macro %s jmpTarget:req\n"
         ".4byte %s\n"
-        "  .4byte \\offset\n"
+        "  .4byte ((.-0x4) - \\jmpTarget)\n"
         ".endm\n",
 
-    [~(AnimCmd_4)] =
+    [~(AnimCmd_End)] =
         ".macro %s\n"
         ".4byte %s\n"
         ".endm\n",
@@ -135,11 +136,11 @@ const char* macros[SizeofArray(animCommands)] = {
         ".endm\n",
 
     // TODO: Parameters might be wrong
-    [~(AnimCmd_6)] =
-        ".macro %s unk4:req, unk8:req, unk9:req, unkA:req, unkB:req\n"
+    [~(AnimCmd_AddHitbox)] =
+        ".macro %s index:req, left:req, top:req, right:req, bottom:req\n"
         ".4byte %s\n"
-        "  .4byte \\unk4\n"
-        "  .byte \\unk8, \\unk9, \\unkA, \\unkB\n"
+        "  .4byte \\index\n"
+        "  .byte \\left, \\top, \\right, \\bottom\n"
         ".endm\n",
 
     [~(AnimCmd_TranslateSprite)] =
@@ -172,7 +173,7 @@ const char* macros[SizeofArray(animCommands)] = {
         "  .4byte \\unkC\n"
         ".endm\n",
 
-    [~(AnimCmd_11)] =
+    [~(AnimCmd_SetSpritePriority)] =
         ".macro %s unk4:req\n"
         ".4byte %s\n"
         "  .4byte \\unk4\n"
@@ -242,7 +243,11 @@ printHeaderLine(FILE* fileStream, const char* name, int value, int rightAlign) {
 static void
 printMacros(FILE* fileStream) {
     for (int i = 0; i < SizeofArray(macros); i++) {
-        fprintf(fileStream, macros[i], macroNames[i], animCommands[i]);
+        if(i == ~AnimCmd_GetPalette) {
+            fprintf(fileStream, macros[i], macroNames[i], animCommands[i], "gObjPalettes_4bpp");
+        } else {
+            fprintf(fileStream, macros[i], macroNames[i], animCommands[i]);
+        }
         fprintf(fileStream, "\n");
     }
 }
@@ -309,7 +314,13 @@ printCommand(FILE* fileStream, DynTableAnimCmd* inAnimCmd, LabelStrings* labels)
 
     case AnimCmd_GetPalette: {
         ACmd_GetPalette* cmd = &inCmd->_pal;
-        fprintf(fileStream, "0x%X %d 0x%X\n", cmd->palId, cmd->numColors, cmd->insertOffset);
+        char palName[64];
+#if 0
+        sprintf(palName, "palObj%03d", cmd->palId);
+        fprintf(fileStream, "%s %d 0x%X\n", palName, cmd->numColors, cmd->insertOffset);
+#else
+        fprintf(fileStream, "%d %d 0x%X\n", cmd->palId, cmd->numColors, cmd->insertOffset);
+#endif
     } break;
 
     case AnimCmd_JumpBack: {
@@ -318,11 +329,11 @@ printCommand(FILE* fileStream, DynTableAnimCmd* inAnimCmd, LabelStrings* labels)
         StringId targetLabel = ((DynTableAnimCmd*)cmd->jumpTarget)->label;
         char* jmpCmdString = getStringFromId(labels, jmpCmdLabel);
         char* targetCmdString = getStringFromId(labels, targetLabel);
-        fprintf(fileStream, "((%s-%s) / %zd)\n\n", jmpCmdString, targetCmdString, sizeof(s32));
+        fprintf(fileStream, "%s\n\n", targetCmdString);
     } break;
 
-    case AnimCmd_4: {
-        ACmd_4* cmd = &inCmd->_end;
+    case AnimCmd_End: {
+        ACmd_End* cmd = &inCmd->_end;
         fprintf(fileStream, "\n\n");
     } break;
 
@@ -332,10 +343,15 @@ printCommand(FILE* fileStream, DynTableAnimCmd* inAnimCmd, LabelStrings* labels)
 
     } break;
 
-    case AnimCmd_6: {
-        ACmd_6* cmd = &inCmd->_6;
-        fprintf(fileStream, "0x%X 0x%X 0x%X 0x%X 0x%X\n",
-            cmd->unk4.unk0, cmd->unk4.unk4, cmd->unk4.unk5, cmd->unk4.unk6, cmd->unk4.unk7);
+    case AnimCmd_AddHitbox: {
+        ACmd_AddHitbox* cmd = &inCmd->_hitbox;
+        // TODO: Once the tool outputs data as C files, output these as signed bytes (ARM macros don't like '-xyz')
+        fprintf(fileStream, "%d 0x%02X 0x%02X 0x%02X 0x%02X\n",
+            cmd->hitbox.index,
+            (u8)cmd->hitbox.left,
+            (u8)cmd->hitbox.top,
+            (u8)cmd->hitbox.right,
+            (u8)cmd->hitbox.bottom);
     } break;
 
     case AnimCmd_TranslateSprite: {
@@ -357,17 +373,17 @@ printCommand(FILE* fileStream, DynTableAnimCmd* inAnimCmd, LabelStrings* labels)
 
     case AnimCmd_10: {
         ACmd_10* cmd = &inCmd->_10;
-        fprintf(fileStream, "0x%x 0x%x 0x%x", cmd->unk4, cmd->unk8, cmd->unkC);
+        fprintf(fileStream, "0x%x 0x%x 0x%x\n", cmd->unk4, cmd->unk8, cmd->unkC);
     } break;
 
-    case AnimCmd_11: {
-        ACmd_SetSpritePriority* cmd = &inCmd->_11;
-        fprintf(fileStream, "0x%x", cmd->unk4);
+    case AnimCmd_SetSpritePriority: {
+        ACmd_SetSpritePriority* cmd = &inCmd->_prio;
+        fprintf(fileStream, "0x%x\n", cmd->unk4);
     } break;
 
     case AnimCmd_12: {
         ACmd_12* cmd = &inCmd->_12;
-        fprintf(fileStream, "0x%x", cmd->unk4);
+        fprintf(fileStream, "0x%x\n", cmd->unk4);
     } break;
 
     default: {
@@ -385,7 +401,7 @@ printCommand(FILE* fileStream, DynTableAnimCmd* inAnimCmd, LabelStrings* labels)
                 fprintf(fileStream, "\t.4byte 0x%07X, 0x%07X\n\n", cmd->displayForNFrames, cmd->frameIndex);
                 assert(FALSE);
             } else
-                fprintf(fileStream, "0x%X 0x%X\n\n", cmd->displayForNFrames, cmd->frameIndex);
+                fprintf(fileStream, "%d %d\n\n", cmd->displayForNFrames, cmd->frameIndex);
         }
     }
     }
@@ -425,7 +441,7 @@ printAnimationDataFile(FILE* fileStream, DynTable* dynTable,
                     // Maybe print label
 
                     if (currCmd->flags & (ACMD_FLAG__IS_START_OF_ANIM | ACMD_FLAG__NEEDS_LABEL)) {
-                        sprintf(labelBuffer, "%s__variant_%d_l%d", animName, variantId, labelId);
+                        sprintf(labelBuffer, "%s__v%d_l%d", animName, variantId, labelId);
 
                         StringId varLabel = pushLabel(labels, stringArena, stringOffsetArena, labelBuffer);
                         currCmd->label = varLabel;
@@ -437,7 +453,7 @@ printAnimationDataFile(FILE* fileStream, DynTable* dynTable,
                     printCommand(fileStream, currCmd, labels);
 
                     // Break loop after printing jump/end command
-                    if((currCmd->cmd.id == AnimCmd_4)
+                    if((currCmd->cmd.id == AnimCmd_End)
                     || (currCmd->cmd.id == AnimCmd_JumpBack)
                     || (currCmd->cmd.id == AnimCmd_SetIdAndVariant))
                         break;
@@ -452,7 +468,7 @@ printAnimationDataFile(FILE* fileStream, DynTable* dynTable,
                     fprintf(fileStream, "%s:\n", entryName);
 
                 for (int variantId = 0; variantId < numVariants; variantId++) {
-                    fprintf(fileStream, "\t.4byte %s__variant_%d_l%d\n", animName, variantId, 0);
+                    fprintf(fileStream, "\t.4byte %s__v%d_l%d\n", animName, variantId, 0);
                 }
                 fprintf(fileStream, "\n\n");
             }
@@ -669,8 +685,8 @@ fillVariantFromRom(MemArena* arena, u8* rom, const RomPointer* variantInRom) {
                 break;
 
                 // 'End' command
-            case AnimCmd_4:
-                structSize = sizeof(ACmd_4);
+            case AnimCmd_End:
+                structSize = sizeof(ACmd_End);
                 breakLoop = TRUE;
                 break;
 
@@ -680,16 +696,16 @@ fillVariantFromRom(MemArena* arena, u8* rom, const RomPointer* variantInRom) {
                 break;
 
 
-            case AnimCmd_6:
-                currCmd->cmd._6.unk4.unk0 = cmdInRom->_6.unk4.unk0;
-                currCmd->cmd._6.unk4.unk4 = cmdInRom->_6.unk4.unk4;
-                currCmd->cmd._6.unk4.unk5 = cmdInRom->_6.unk4.unk5;
-                currCmd->cmd._6.unk4.unk6 = cmdInRom->_6.unk4.unk6;
-                currCmd->cmd._6.unk4.unk7 = cmdInRom->_6.unk4.unk7;
-                structSize = sizeof(ACmd_6);
+            case AnimCmd_AddHitbox:
+                currCmd->cmd._hitbox.hitbox.index = cmdInRom->_hitbox.hitbox.index;
+                currCmd->cmd._hitbox.hitbox.left = cmdInRom->_hitbox.hitbox.left;
+                currCmd->cmd._hitbox.hitbox.top = cmdInRom->_hitbox.hitbox.top;
+                currCmd->cmd._hitbox.hitbox.right = cmdInRom->_hitbox.hitbox.right;
+                currCmd->cmd._hitbox.hitbox.bottom = cmdInRom->_hitbox.hitbox.bottom;
+                structSize = sizeof(ACmd_AddHitbox);
                 break;
 
-            case AnimCmd_TranslateSprite:
+            hitboxAnimCmd_TranslateSprite:
                 currCmd->cmd._translate.x = cmdInRom->_translate.x;
                 currCmd->cmd._translate.y = cmdInRom->_translate.y;
                 structSize = sizeof(ACmd_TranslateSprite);
@@ -716,8 +732,8 @@ fillVariantFromRom(MemArena* arena, u8* rom, const RomPointer* variantInRom) {
                 structSize = sizeof(ACmd_10);
                 break;
                 
-            case AnimCmd_11:
-                currCmd->cmd._11.unk4 = cmdInRom->_11.unk4;
+            case AnimCmd_SetSpritePriority:
+                currCmd->cmd._prio.unk4 = cmdInRom->_prio.unk4;
                 structSize = sizeof(ACmd_SetSpritePriority);
                 break;
                 
@@ -899,9 +915,9 @@ void iterateAllCommands(FILE* fileStream, DynTable *dynTable, u16 startAnimId, u
 
                 dtCmd++;
 
-                if((dtCmd->cmd.id == AnimCmd_4)
+                if((dtCmd->cmd.id == AnimCmd_End)
                 || (dtCmd->cmd.id == AnimCmd_JumpBack)
-                //|| (dtCmd->cmd.id == AnimCmd_SetIdAndVariant)
+                || (dtCmd->cmd.id == AnimCmd_SetIdAndVariant) // Enable for SA1 (only?)
                 || (dtCmd->cmd.id < AnimCmd_12))
                     break;
             }
@@ -1228,7 +1244,7 @@ void generateSprite(u8* rom, MemArena* fullTileImage, SpriteTables* spriteTables
     FrameData* fds = fdi->data;
 
     SpriteOffset* dimensions = romToVirtual(rom, spriteTables->dimensions[animId]);
-    u16* oamDataStart      = romToVirtual(rom, spriteTables->oamData[animId]);
+    u16* oamDataStart        = romToVirtual(rom, spriteTables->oamData[animId]);
 
     // Write script header
 
@@ -1237,6 +1253,8 @@ void generateSprite(u8* rom, MemArena* fullTileImage, SpriteTables* spriteTables
 
     char filePath[256];
     char filenameNoExt[64];
+
+    eGame game = getRomIndex(rom);
     
     for (int frameId = 0; frameId < fdi->frameCount; frameId++) {
         // Reset the frame buffer, to reduce memory usage
@@ -1256,8 +1274,13 @@ void generateSprite(u8* rom, MemArena* fullTileImage, SpriteTables* spriteTables
 
         u16* palette = &spriteTables->palettes[fd->paletteId * 16];
 
+        // Seems like SA3 and KATAM had a different layout?
+        u8 oamIndex = (game == SA1 || game == SA2) ? 
+            frameDimensions->oamIndex :
+            frameDimensions->flip; 
+
         // Pointer to OamData of the whole frame
-        OamSplit* frameOamData = (OamSplit*)(&oamDataStart[frameDimensions->oamIndex*3]);
+        OamSplit* frameOamData = (OamSplit*)(&oamDataStart[oamIndex*3]);
 
         int tileSize = (fd->tileIndex & 0x80000000)
             ? TILE_SIZE_8BPP
@@ -1349,6 +1372,7 @@ skipGeneration:
                 cmdTileWidth);
 
             // PNG -> 4BPP script
+            // TODO: Split 4bpp and 8bpp into separate files
             fprintf(tile_collection, "./tools/gbagfx/gbagfx %s/%s.png %s/%s.%s -width %d\n",
                 framePath, filenameNoExt,
                 framePath, filenameNoExt, fileExt,
@@ -1365,8 +1389,8 @@ skipGeneration:
 
             // Assembly file, putting all tiles together
             fprintf(inc_bin,
-                "\t%s.incbin \"%s/%s.%s\"\n",
-                "graphics/frames", framePath, filenameNoExt, fileExt);
+                ".incbin \"%s/%s.%s\"\n",
+                framePath, filenameNoExt, fileExt);
         }
     }
 }
@@ -1528,7 +1552,7 @@ int main(int argCount, char** args) {
         fwrite(paletteBuffer, 2, 16, palFile);
         fclose(palFile);
 
-        fprintf(paletteInc, "./gbagfx \"obj_palettes/%s\" \"obj_palettes/pal_%03d.pal\"\n", fileName, i);
+        fprintf(paletteInc, "./gbagfx \"palettes/%s\" \"palettes/pal_%03d.pal\"\n", fileName, i);
     }
     fclose(paletteInc);
 #endif
