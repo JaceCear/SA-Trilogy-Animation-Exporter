@@ -13,7 +13,7 @@
 
 
 #include "types.h"
-#include "arenaAlloc.h"
+#include "ArenaAlloc.h"
 
 // Needs to be included before animExporter.h
 #include "animation_commands.h"
