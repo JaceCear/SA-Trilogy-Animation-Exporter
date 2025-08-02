@@ -915,22 +915,22 @@ fillVariantFromRom(MemArena* arena, u8* rom, const RomPointer* variantInRom) {
             currCmd->cmd.id = cmdInRom->id;
             
             switch (cmdInRom->id) {
-                case AnimCmd_GetTiles:
+            case AnimCmd_GetTiles: {
                 currCmd->cmd._tiles.tileIndex      = cmdInRom->_tiles.tileIndex;
                 currCmd->cmd._tiles.numTilesToCopy = cmdInRom->_tiles.numTilesToCopy;
                 structSize = sizeof(ACmd_GetTiles);
-                break;
+            } break;
                 
-                case AnimCmd_GetPalette:
+            case AnimCmd_GetPalette: {
                 currCmd->cmd._pal.palId        = cmdInRom->_pal.palId;
                 currCmd->cmd._pal.numColors    = cmdInRom->_pal.numColors;
                 currCmd->cmd._pal.insertOffset = cmdInRom->_pal.insertOffset;
                 structSize = sizeof(ACmd_GetPalette);
-                break;
+            } break;
                 
                 // This sets the jump-address, to make it easier to
                 // find the commands needing a headline.
-                case AnimCmd_JumpBack:
+            case AnimCmd_JumpBack: {
                 currCmd->cmd._jump.offset = cmdInRom->_jump.offset;
                 currCmd->jmpTarget = cmdAddress - cmdInRom->_jump.offset*sizeof(s32);
                 structSize = sizeof(ACmd_JumpBack);
@@ -950,65 +950,65 @@ fillVariantFromRom(MemArena* arena, u8* rom, const RomPointer* variantInRom) {
                 }
                 
                 breakLoop = TRUE;
-                break;
+            } break;
                 
                 // 'End' command
-                case AnimCmd_End:
+            case AnimCmd_End: {
                 structSize = sizeof(ACmd_End);
                 breakLoop = TRUE;
-                break;
+            } break;
                 
-                case AnimCmd_PlaySoundEffect:
+            case AnimCmd_PlaySoundEffect: {
                 currCmd->cmd._sfx.songId = cmdInRom->_sfx.songId;
                 structSize = sizeof(ACmd_PlaySoundEffect);
-                break;
+            } break;
                 
                 
-                case AnimCmd_AddHitbox:
+            case AnimCmd_AddHitbox: {
                 currCmd->cmd._hitbox.hitbox.index = cmdInRom->_hitbox.hitbox.index;
                 currCmd->cmd._hitbox.hitbox.left = cmdInRom->_hitbox.hitbox.left;
                 currCmd->cmd._hitbox.hitbox.top = cmdInRom->_hitbox.hitbox.top;
                 currCmd->cmd._hitbox.hitbox.right = cmdInRom->_hitbox.hitbox.right;
                 currCmd->cmd._hitbox.hitbox.bottom = cmdInRom->_hitbox.hitbox.bottom;
                 structSize = sizeof(ACmd_AddHitbox);
-                break;
+            } break;
                 
-                hitboxAnimCmd_TranslateSprite:
+            case AnimCmd_TranslateSprite: {
                 currCmd->cmd._translate.x = cmdInRom->_translate.x;
                 currCmd->cmd._translate.y = cmdInRom->_translate.y;
                 structSize = sizeof(ACmd_TranslateSprite);
-                break;
+            } break;
                 
-                case AnimCmd_8:
+            case AnimCmd_8: {
                 currCmd->cmd._8.unk4 = cmdInRom->_8.unk4;
                 currCmd->cmd._8.unk8 = cmdInRom->_8.unk8;
                 structSize = sizeof(ACmd_8);
-                break;
+            } break;
                 
-                case AnimCmd_SetIdAndVariant:
+            case AnimCmd_SetIdAndVariant: {
                 currCmd->cmd._animId.animId  = cmdInRom->_animId.animId;
                 currCmd->cmd._animId.variant = cmdInRom->_animId.variant;
                 structSize = sizeof(ACmd_SetIdAndVariant);
                 
                 breakLoop = TRUE;
-                break;
+            } break;
                 
-                case AnimCmd_10:
+            case AnimCmd_10: {
                 currCmd->cmd._10.unk4 = cmdInRom->_10.unk4;
                 currCmd->cmd._10.unk8 = cmdInRom->_10.unk8;
                 currCmd->cmd._10.unkC = cmdInRom->_10.unkC;
                 structSize = sizeof(ACmd_10);
-                break;
+            } break;
                 
-                case AnimCmd_SetSpritePriority:
+            case AnimCmd_SetSpritePriority: {
                 currCmd->cmd._prio.unk4 = cmdInRom->_prio.unk4;
                 structSize = sizeof(ACmd_SetSpritePriority);
-                break;
+            } break;
                 
-                case AnimCmd_12:
+            case AnimCmd_12: {
                 currCmd->cmd._12.unk4 = cmdInRom->_12.unk4;
                 structSize = sizeof(ACmd_12);
-                break;
+            } break;
             }
         }
         else {
