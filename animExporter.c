@@ -8,7 +8,7 @@
 #define mkdir _mkdir
 #else
 #include <sys/stat.h>
-#define mkdir(a) { mode_t perms = 666; mkdir((a), perms); }
+#define mkdir(a) { mode_t perms = 0666; mkdir((a), perms); }
 #endif
 
 

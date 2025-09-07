@@ -11,5 +11,10 @@
 *.bin
 *.raw
 
+*.gbapal
+*.png
+*.4bpp
+*.8bpp
+
 animExporter
 *.exe
