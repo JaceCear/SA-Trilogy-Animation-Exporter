@@ -842,6 +842,7 @@ void getSpriteTables(u8* rom, int gameIndex, SpriteTables* tables) {
         } break;
         
         case 3: {
+            //result = romToVirtual(rom, 0x080003B4);// SA3(JP [Kiosk])
             result = romToVirtual(rom, 0x08000404);// SA3(PAL, NTSC)
             result = romToVirtual(rom, *result);
             
@@ -866,6 +867,13 @@ void getSpriteTables(u8* rom, int gameIndex, SpriteTables* tables) {
     tables->palettes   = romToVirtual(rom, romTable->palettes);
     tables->tiles_4bpp = romToVirtual(rom, romTable->tiles_4bpp);
     tables->tiles_8bpp = romToVirtual(rom, romTable->tiles_8bpp);
+
+    if(gameIndex == SA3 || gameIndex == KATAM) {
+        tables->sa3OnlyData = romToVirtual(rom, romTable->sa3OnlyData);
+    } else {
+        tables->sa3OnlyData = NULL;
+    }
+
 }
 
 // Input:
@@ -1543,9 +1551,9 @@ void generateSprite(u8* rom, MemArena* fullTileImage, SpriteTables* spriteTables
         u16* palette = &spriteTables->palettes[fd->paletteId * 16];
         
         // Seems like SA3 and KATAM had a different layout?
-        u8 oamIndex = (game == SA1 || game == SA2) ? 
-            frameDimensions->oamIndex :
-        frameDimensions->flip; 
+        u8 oamIndex = (game == SA1 || game == SA2)
+            ? frameDimensions->oamIndex
+            : frameDimensions->flip; 
         
         // Pointer to OamData of the whole frame
         OamSplit* frameOamData = (OamSplit*)(&oamDataStart[oamIndex*3]);
@@ -1795,7 +1803,7 @@ int main(int argCount, char** args) {
     TileInfo tileInfo = { 0 };
     tileInfo.tileRanges = &tileRanges;
     
-#if 0
+#if 01
     generateSprites(rom, &dynTable, &spriteTables, 0, animTable.entryCount,
                     framePath, docsPath, palettePath, genFramesScriptFilePath, gfxIncFilePath);
 #endif
@@ -1804,7 +1812,9 @@ int main(int argCount, char** args) {
 #if OUTPUT_PALETTES
     u16 paletteBuffer[16 * 16];
     int colorsPerPalette = 16;
-    int paletteCount = ((spriteTables.tiles_4bpp - (u8*)spriteTables.palettes) / (2*colorsPerPalette));
+    int paletteCount = (game == SA3 || game == KATAM)
+        ? ((spriteTables.sa3OnlyData - (u8*)spriteTables.palettes) / (2*colorsPerPalette))
+        : ((spriteTables.tiles_4bpp  - (u8*)spriteTables.palettes) / (2*colorsPerPalette));
     
     FILE* paletteInc = fopen(paletteFilePath, "w");
     

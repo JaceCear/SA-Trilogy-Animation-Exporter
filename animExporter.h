@@ -57,6 +57,7 @@ typedef struct {
     /* 0x0C u16*  */ RomPointer palettes;
     /* 0x10 void* */ RomPointer tiles_4bpp;
     /* 0x14 void* */ RomPointer tiles_8bpp;
+    /* 0x18 void* */ RomPointer sa3OnlyData;
 } SpriteTablesROM;
 
 typedef struct {
@@ -111,6 +112,7 @@ typedef struct {
     /* 0x0C */ u16*  palettes;
     /* 0x10 */ u8*   tiles_4bpp;
     /* 0x14 */ u8*   tiles_8bpp;
+    /* 0x18 */ u8*   sa3OnlyData; // only in SA3 / KATAM
 } SpriteTables;
 
 #endif // GUARD_ANIM_EXPORTER_H
